@@ -7,10 +7,19 @@ from typing import Optional
 
 import pygame
 
-from .config import BUILD_SPECS, COLORS, TILE_SIZE
+from .config import BUILD_SPECS, COLORS, EXHAUSTED_TINT, INFECTED_TINT, SWARM_SPRITES, TILE_SIZE
 from .entities import Building, Unit, ZombieSwarm
 from .grid import Pos, Terrain
+from .sprites import SpriteManager
 from .world import World
+
+
+def swarm_sprite_key(count: int) -> str:
+    key = SWARM_SPRITES[0][1]
+    for threshold, name in SWARM_SPRITES:
+        if count >= threshold:
+            key = name
+    return key
 
 
 @dataclass
@@ -105,9 +114,24 @@ class Renderer:
         Terrain.WATER: COLORS["water"],
     }
 
-    def __init__(self):
+    def __init__(self, sprites: Optional[SpriteManager] = None):
         self._fonts: dict[int, pygame.font.Font] = {}
         self._overlays: dict[tuple, pygame.Surface] = {}
+        self.sprites = sprites if sprites is not None else SpriteManager()
+        self.use_sprites = True
+
+    def _sprite(self, surface: pygame.Surface, key: str, rect: pygame.Rect,
+                tint=None) -> Optional[pygame.Rect]:
+        """Desenha o sprite recortado dentro do tile; retorna o retângulo usado ou None."""
+        if not self.use_sprites:
+            return None
+        inner = rect.inflate(-2, -2)
+        img = self.sprites.get(key, min(inner.w, inner.h), tint)
+        if img is None:
+            return None
+        dest = img.get_rect(center=inner.center)
+        surface.blit(img, dest)
+        return dest
 
     def font(self, size: int) -> pygame.font.Font:
         size = max(8, int(size))
@@ -265,6 +289,13 @@ class Renderer:
                 pygame.draw.line(surface, color, (r.right - 1, r.top), (r.right - 1, r.bottom - 1), 2)
 
     def _draw_building(self, surface, rect: pygame.Rect, b: Building, ts) -> None:
+        tint = INFECTED_TINT if b.kind == "infected" else None
+        dest = self._sprite(surface, b.kind, rect, tint)
+        if dest is not None:
+            border = COLORS["zombie_aggr"] if b.hostile else (0, 0, 0)
+            pygame.draw.rect(surface, border, dest, 2)
+            self._hp_bar(surface, rect, b.hp, b.max_hp)
+            return
         inner = rect.inflate(-max(2, int(ts * 0.1)), -max(2, int(ts * 0.1)))
         pygame.draw.rect(surface, COLORS[b.color_key], inner, border_radius=max(1, int(ts * 0.08)))
         pygame.draw.rect(surface, (0, 0, 0), inner, 2, border_radius=max(1, int(ts * 0.08)))
@@ -275,15 +306,20 @@ class Renderer:
         self._hp_bar(surface, rect, b.hp, b.max_hp)
 
     def _draw_unit(self, surface, rect: pygame.Rect, u: Unit, ts, selected: bool) -> None:
-        radius = int(ts * 0.36)
-        center = (rect.centerx, rect.centery - int(ts * 0.04))
-        color = COLORS[u.color_key]
-        if u.exhausted:
-            color = tuple(c // 2 for c in color)
-        pygame.draw.circle(surface, color, center, radius)
-        pygame.draw.circle(surface, COLORS["select"] if selected else (0, 0, 0), center, radius,
-                           3 if selected else 2)
-        self._text(surface, u.symbol, center, ts * 0.5)
+        dest = self._sprite(surface, u.kind, rect, EXHAUSTED_TINT if u.exhausted else None)
+        if dest is not None:
+            border = COLORS["select"] if selected else COLORS[u.color_key]
+            pygame.draw.rect(surface, border, dest, 3 if selected else 2)
+        else:
+            radius = int(ts * 0.36)
+            center = (rect.centerx, rect.centery - int(ts * 0.04))
+            color = COLORS[u.color_key]
+            if u.exhausted:
+                color = tuple(c // 2 for c in color)
+            pygame.draw.circle(surface, color, center, radius)
+            pygame.draw.circle(surface, COLORS["select"] if selected else (0, 0, 0), center, radius,
+                               3 if selected else 2)
+            self._text(surface, u.symbol, center, ts * 0.5)
         dot = max(2, int(ts * 0.07))
         if not u.moved:
             pygame.draw.circle(surface, COLORS["move"], (rect.left + dot + 2, rect.top + dot + 2), dot)
@@ -292,10 +328,22 @@ class Renderer:
         self._hp_bar(surface, rect, u.hp, u.max_hp)
 
     def _draw_swarm(self, surface, rect: pygame.Rect, s: ZombieSwarm, ts) -> None:
+        border = COLORS["zombie_noise"] if s.noise_target is not None else (0, 0, 0)
+        dest = self._sprite(surface, swarm_sprite_key(s.count), rect)
+        if dest is not None:
+            if s.aggressive and s.noise_target is None:
+                border = COLORS["zombie_aggr"]
+            pygame.draw.rect(surface, border, dest, 2)
+            r = max(5, int(ts * 0.2))
+            badge = (dest.right - r, dest.bottom - r)
+            pygame.draw.circle(surface, COLORS["zombie_aggr"] if s.aggressive else COLORS["zombie_idle"],
+                               badge, r)
+            pygame.draw.circle(surface, (0, 0, 0), badge, r, 1)
+            self._text(surface, str(s.count), badge, r * 1.7)
+            return
         inner = rect.inflate(-max(2, int(ts * 0.14)), -max(2, int(ts * 0.14)))
         color = COLORS["zombie_aggr"] if s.aggressive else COLORS["zombie_idle"]
         pygame.draw.rect(surface, color, inner)
-        border = COLORS["zombie_noise"] if s.noise_target is not None else (0, 0, 0)
         pygame.draw.rect(surface, border, inner, 2)
         self._text(surface, str(s.count), inner.center, ts * 0.62)
 

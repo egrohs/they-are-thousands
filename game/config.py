@@ -12,6 +12,22 @@ MUSIC_VOLUME_DEFAULT = 0.5
 MUSIC_VOLUME_STEP = 0.1
 MUSIC_FADE_MS = 1500
 
+# --- Sprites ----------------------------------------------------------------
+IMAGES_DIR = ASSETS_DIR / "images"
+# chave -> (arquivo, âncora vertical do recorte: 0 = topo, 0.5 = centro)
+SPRITE_FILES: dict[str, tuple[str, float]] = {
+    "ranger": ("ranger.png", 0.15),
+    "tent": ("tend.png", 0.5),
+    "infected": ("tend.png", 0.5),
+    "zombie_runner": ("runner.png", 0.2),
+    "zombie": ("zombie.png", 0.15),
+    "zombie_executor": ("executor.png", 0.2),
+}
+# densidade mínima do enxame -> sprite (maior limite atingido vence)
+SWARM_SPRITES = ((1, "zombie_runner"), (4, "zombie"), (7, "zombie_executor"))
+INFECTED_TINT = (140, 230, 110)
+EXHAUSTED_TINT = (120, 120, 120)
+
 # --- Grade / Janela -------------------------------------------------------
 GRID_W = 24
 GRID_H = 24

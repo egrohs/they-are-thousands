@@ -137,6 +137,8 @@ class GameApp:
                 self.open_menu()
         elif event.key == pygame.K_f:
             self.set_fog(not self.settings.fog_enabled)
+        elif event.key == pygame.K_g:
+            self.renderer.use_sprites = not self.renderer.use_sprites
         elif event.key == pygame.K_m:
             self.toggle_music()
         elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):

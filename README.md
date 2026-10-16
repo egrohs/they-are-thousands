@@ -22,6 +22,7 @@ python -m unittest discover -s tests -t .
 | `M` / item do menu | Liga/desliga a música |
 | `-` `+` (menu: `←` `→`) | Volume da música |
 | `N` | Próxima faixa |
+| `G` | Alterna sprites / placeholders geométricos |
 | Botão direito | Cancela modo/seleção |
 | `Espaço` / botão | Encerrar turno |
 | WASD/Setas, botão do meio, roda | Câmera e zoom |
@@ -30,6 +31,14 @@ python -m unittest discover -s tests -t .
 ## Trilha sonora
 Todos os arquivos `.mp3/.ogg/.wav/.flac` em `assets/audio/music/` tocam em ordem alfabética,
 em loop, com fade. Sem dispositivo de áudio ou com arquivo inválido, o jogo segue sem música.
+
+## Sprites
+Imagens de `assets/images/` (mapeadas em `SPRITE_FILES` no `config.py`) são recortadas para o tile
+e reescaladas conforme o zoom:
+- `ranger.png` → Ranger; `tend.png` → Tenda (e Casa Infectada, tingida de verde).
+- Enxames por densidade: `runner.png` (1–3), `zombie.png` (4–6), `executor.png` (7–10);
+  o número fica no selo do canto (vermelho = agressivo; borda laranja = atraído por barulho).
+- Sem imagem (Soldado, CC, Muro, Balista, Tesla) ou arquivo ausente → placeholder geométrico.
 
 ## Névoa de guerra (FOW)
 Adaptada de *They Are Billions*; liga/desliga pelo menu inicial/pausa ou `F`, a qualquer momento.
@@ -63,5 +72,6 @@ Construa Teslas na borda para avançar; se uma Tesla cair, o território dela so
 - `game/hud.py` – painel lateral
 - `game/fog.py` – névoa de guerra (visível/explorado)
 - `game/audio.py` – player da trilha sonora
+- `game/sprites.py` – carregamento/cache das imagens de unidades e construções
 - `game/menu.py` – menu inicial/pausa e configurações
 - `game/app.py` – loop principal e entrada
