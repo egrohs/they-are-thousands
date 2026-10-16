@@ -7,7 +7,8 @@ from typing import Optional
 
 from .config import MAX_SWARM_SIZE
 from .grid import Pos
-from .stats import BUILDING_STATS, UNIT_SPECS, ZOMBIE_SPECS, BuildingStats, ZombieSpec
+from .stats import (BUILDING_STATS, HERO_SPECS, UNIT_SPECS, ZOMBIE_SPECS, BuildingStats,
+                    HeroStats, ZombieSpec)
 
 
 class Entity:
@@ -158,6 +159,91 @@ class Ranger(Unit):
     kind = "ranger"
 
 
+class Hero(Unit):
+    """Herói controlado por um jogador (`owner`; 0 = sem dono, qualquer um controla).
+    Stats base em `data/heroes.csv`; dano/HP/mana crescem por nível (XP).
+
+    Estados: "active" (no mapa), "downed" (caído no tile por alguns turnos, hp 0,
+    aguardando resgate) e "recovering" (capturado, fora do mapa, convalescendo na base)."""
+    kind = "hero"
+
+    def __init__(self, pos: Pos, hero_id: str, owner: int = 0):
+        spec: HeroStats = HERO_SPECS[hero_id]
+        self.spec = spec
+        self.hero_id = hero_id
+        self.name = spec.name
+        self.role = spec.role
+        self.symbol = spec.symbol
+        self.color = spec.color
+        self.color_key = "text"
+        self.owner = owner
+        Entity.__init__(self, pos, spec.hp)
+        self.moved = False
+        self.acted = False
+        self.xp = 0
+        self.level = 1
+        self.mana = spec.mana
+        self.cooldowns: dict[str, int] = {}
+        self.state = "active"
+        self.downed_turns = 0
+        self.downed_fresh = False   # caiu neste turno: a contagem só começa no próximo
+        self.recover_turns = 0
+        self.debuff_turns = 0
+        self.stealth_turns = 0
+        self.guard_turns = 0
+        self.guard_armor = 0
+        self.kills = 0
+
+    # --- atributos derivados do nível e de efeitos --------------------------
+    @property
+    def debuffed(self) -> bool:
+        return self.debuff_turns > 0
+
+    @property
+    def move_range(self) -> int:
+        return max(1, self.spec.move - (1 if self.debuffed else 0))
+
+    @property
+    def attack_range(self) -> int:
+        return self.spec.attack_range
+
+    @property
+    def damage(self) -> int:
+        base = self.spec.damage + self.spec.damage_per_level * (self.level - 1)
+        return max(1, base - (1 if self.debuffed else 0))
+
+    @property
+    def noise(self) -> int:
+        return self.spec.noise
+
+    @property
+    def vision(self) -> int:
+        return self.spec.vision
+
+    @property
+    def armor(self) -> int:
+        return self.spec.armor + self.guard_armor
+
+    @property
+    def max_mana(self) -> int:
+        return self.spec.mana + self.spec.mana_per_level * (self.level - 1)
+
+    @property
+    def stealthed(self) -> bool:
+        return self.stealth_turns > 0 and self.alive
+
+    @property
+    def downed(self) -> bool:
+        return self.state == "downed"
+
+    def take_damage(self, amount: int) -> int:
+        return super().take_damage(max(1, amount - self.armor) if amount > 0 else 0)
+
+    def cooldown(self, skill_id: str) -> int:
+        return self.cooldowns.get(skill_id, 0)
+
+
+
 # --- Zumbis ------------------------------------------------------------------
 class ZombieSwarm:
     """Pilha de 1..max_stack zumbis do mesmo tipo ocupando um único tile."""
@@ -172,6 +258,9 @@ class ZombieSwarm:
         self.noise_target: Optional[Pos] = None
         self.noise_turns = 0
         self.intent: Optional[Pos] = None  # tile que o enxame quer atacar
+        self.taunt_hero: Optional[str] = None  # herói que o provocou (persegue e ataca)
+        self.taunt_turns = 0
+        self.rooted_turns = 0              # preso por Raízes: não anda
 
     @property
     def name(self) -> str:

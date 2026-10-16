@@ -42,7 +42,8 @@ class FogOfWar:
 
     @staticmethod
     def vision_of(entity: "Building | Unit") -> int:
-        return VISION_RADIUS.get(entity.kind, 0)
+        vision = getattr(entity, "vision", None)
+        return vision if isinstance(vision, int) else VISION_RADIUS.get(entity.kind, 0)
 
     def update(self) -> None:
         visible: set[Pos] = set()

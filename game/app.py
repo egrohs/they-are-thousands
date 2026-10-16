@@ -13,7 +13,9 @@ from .stats import BUILD_SPECS
 from .audio import MusicPlayer
 from .coop import ClientSession, GameSetup, HostSession, Session
 from .editor import EditorScreen
+from .entities import Hero
 from .grid import Pos
+from .heropick import HeroPicker
 from .hud import HUD
 from .maps import MapError, list_maps, load_map
 from .menu import Menu, Settings
@@ -26,6 +28,7 @@ MODE_KEYS = {pygame.K_1: "wall", pygame.K_2: "tent", pygame.K_3: "ballista", pyg
              pygame.K_5: "tesla", pygame.K_6: "watchtower",
              pygame.K_7: "sawmill", pygame.K_8: "quarry"}
 RANDOM_MAP_LABEL = "Aleatório"
+SKILL_KEYS = (pygame.K_q, pygame.K_e, pygame.K_r)
 
 
 class GameApp:
@@ -56,6 +59,7 @@ class GameApp:
         self.in_editor = False
         self.camera = Camera(self.viewport, GRID_W, GRID_H)
         self.ui = UIState()
+        self.picker = HeroPicker(self.viewport)
         self._local_ip = ""
         self.session: Session = Session(GameSetup.new(seed, self.settings.fog_enabled, self.map_data))
         self._generation = self.session.generation
@@ -70,6 +74,29 @@ class GameApp:
     @property
     def turns(self) -> TurnManager:
         return self.session.turns
+
+    @property
+    def player_id(self) -> int:
+        return self.session.player_id
+
+    @property
+    def my_hero(self) -> Optional[Hero]:
+        return self.world.hero_of(self.player_id)
+
+    @property
+    def picking_hero(self) -> bool:
+        """O jogador local ainda não tem herói: a tela de escolha bloqueia o jogo."""
+        return self.my_hero is None and not self.world.game_over
+
+    def can_control(self, unit) -> bool:
+        return self.world.can_control(unit, self.player_id)
+
+    def pick_hero(self, hero_id: str) -> None:
+        if self.world.can_pick_hero(hero_id, self.player_id)[0]:
+            self.submit({"op": "hero", "role": hero_id})
+            hero = self.my_hero
+            if hero is not None:
+                self.camera.center_on_tile(hero.pos)
 
     def new_game(self, seed: Optional[int] = None) -> bool:
         setup = GameSetup.new(seed, self.settings.fog_enabled, self.map_data)
@@ -258,6 +285,8 @@ class GameApp:
                 self._on_menu_action(action)
         elif self.in_editor and self.editor is not None:
             self.editor.handle_event(event)
+        elif self.picking_hero:
+            self._on_picker_event(event)
         elif event.type == pygame.KEYDOWN:
             self._on_key(event)
         elif event.type == pygame.MOUSEWHEEL:
@@ -276,11 +305,37 @@ class GameApp:
         elif event.type == pygame.MOUSEMOTION and self._drag_origin is not None:
             self.camera.pan(-event.rel[0], -event.rel[1])
 
+    def _on_picker_event(self, event: pygame.event.Event) -> None:
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                self.open_menu()
+            elif event.key == pygame.K_m:
+                self.toggle_music()
+            else:
+                choice = self.picker.key_choice(event.key)
+                if choice is not None:
+                    self.pick_hero(choice)
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.hud.menu_button.rect.collidepoint(event.pos):
+                self.open_menu()
+                return
+            choice = self.picker.card_at(event.pos)
+            if choice is not None:
+                self.pick_hero(choice)
+
     def _on_key(self, event: pygame.event.Event) -> None:
-        if event.key == pygame.K_r and (event.mod & pygame.KMOD_CTRL or self.world.game_over):
+        hero = self._selected_hero()
+        if (event.key in SKILL_KEYS and hero is not None and not event.mod & pygame.KMOD_CTRL
+                and not self.world.game_over):
+            self.activate_skill(SKILL_KEYS.index(event.key))
+        elif event.key == pygame.K_r and (event.mod & pygame.KMOD_CTRL or self.world.game_over):
             self.new_game()
+        elif event.key == pygame.K_h:
+            self.select_my_hero()
         elif event.key == pygame.K_ESCAPE:
-            if self.ui.mode or self.ui.selected_unit:
+            if self.ui.skill:
+                self.ui.skill = None
+            elif self.ui.mode or self.ui.selected_unit:
                 self.cancel()
             else:
                 self.open_menu()
@@ -305,12 +360,54 @@ class GameApp:
 
     def cancel(self) -> None:
         self.ui.mode = None
+        self.ui.skill = None
         self.ui.selected_unit = None
+
+    def _selected_hero(self) -> Optional[Hero]:
+        u = self.ui.selected_unit
+        return u if isinstance(u, Hero) and self.can_control(u) else None
+
+    def select_my_hero(self) -> None:
+        hero = self.my_hero
+        if hero is None:
+            return
+        if hero.state == "recovering":
+            self.world.message(f"{hero.name} está convalescendo na base ({hero.recover_turns} turno(s)).")
+            return
+        self.ui.mode = None
+        self.ui.skill = None
+        self.ui.selected_unit = hero if hero.alive else None
+        self.ui.selected_tile = hero.pos
+        self.camera.center_on_tile(hero.pos)
+
+    def activate_skill(self, index: int) -> None:
+        """Q/E/R ou botão: habilidades sem alvo são usadas na hora; as demais entram em mira."""
+        hero = self._selected_hero()
+        if hero is None or not self.turns.is_player_phase:
+            return
+        skills = self.world.hero_skills(hero)
+        if not 0 <= index < len(skills):
+            return
+        skill = skills[index]
+        if self.ui.skill == skill.id:
+            self.ui.skill = None
+            return
+        ok, reason = self.world.skill_status(hero, skill.id)
+        if not ok:
+            self.world.message(reason)
+            return
+        if skill.target == "self":
+            self.submit({"op": "skill", "skill": skill.id, "from": list(hero.pos), "to": list(hero.pos)})
+            self.ui.skill = None
+        else:
+            self.ui.skill = skill.id
+            self.ui.mode = None
 
     def set_mode(self, mode: str) -> None:
         if not self.turns.is_player_phase:
             return
         self.ui.mode = None if self.ui.mode == mode else mode
+        self.ui.skill = None
         self.ui.selected_unit = None
 
     def undo(self) -> None:
@@ -332,6 +429,12 @@ class GameApp:
                 self.undo()
             elif button.action == "menu":
                 self.open_menu()
+            elif button.action.startswith("skill:"):
+                self.activate_skill(int(button.action.split(":")[1]))
+            elif button.action == "deselect":
+                self.cancel()
+            elif button.action == "my_hero":
+                self.select_my_hero()
             else:
                 self.set_mode(button.action)
             return
@@ -354,9 +457,18 @@ class GameApp:
             return
 
         unit = self.ui.selected_unit
+        if unit is not None and self.ui.skill and isinstance(unit, Hero):
+            skill, self.ui.skill = self.ui.skill, None
+            if pos in world.skill_targets(unit, skill):
+                self.submit({"op": "skill", "skill": skill, "from": list(unit.pos), "to": list(pos)})
+            return
         if unit is not None:
             op = None
-            if tile.unit is not None:
+            if not self.can_control(unit):
+                self.ui.selected_unit = tile.unit if tile.unit is not unit else None
+            elif pos in world.revive_targets(unit):
+                op = "revive"
+            elif tile.unit is not None:
                 self.ui.selected_unit = None if tile.unit is unit else tile.unit
             elif pos in world.attack_targets(unit):
                 op = "attack"
@@ -401,15 +513,26 @@ class GameApp:
             ui.selected_unit = None  # morta, ou substituída por desfazer/ressincronização
         if not self.turns.is_player_phase:
             ui.mode = None
+            ui.skill = None
+        ui.player_id = self.player_id
         ui.hover_tile = self.camera.screen_to_tile(pygame.mouse.get_pos())
         self.session.send_cursor(ui.hover_tile)
         unit = ui.selected_unit
-        if unit is not None and self.turns.is_player_phase:
+        if unit is not None and self.turns.is_player_phase and self.can_control(unit):
             ui.move_tiles = set(self.world.unit_moves(unit))
             ui.attack_tiles = set(self.world.attack_targets(unit))
             ui.gather_tiles = set(self.world.gather_targets(unit))
+            ui.revive_tiles = set(self.world.revive_targets(unit))
+            if ui.skill and isinstance(unit, Hero):
+                ui.skill_tiles = set(self.world.skill_targets(unit, ui.skill))
+                if not ui.skill_tiles:
+                    ui.skill = None
+                ui.move_tiles, ui.attack_tiles, ui.gather_tiles = set(), set(), set()
+            else:
+                ui.skill, ui.skill_tiles = None, set()
         else:
             ui.move_tiles, ui.attack_tiles, ui.gather_tiles = set(), set(), set()
+            ui.revive_tiles, ui.skill_tiles, ui.skill = set(), set(), None
 
     def draw(self) -> None:
         self.screen.fill(COLORS["bg"])
@@ -420,6 +543,8 @@ class GameApp:
             self.hud.draw(self.screen, self.world, self.turns, self.ui, pygame.mouse.get_pos())
             if self.world.game_over and not self.turns.busy:
                 self._draw_game_over()
+            elif self.picking_hero and not self.menu.open:
+                self.picker.draw(self.screen, self.world, self.player_id, pygame.mouse.get_pos())
         if self.menu.open:
             self.menu.draw(self.screen, self.settings,
                            self.music.current_track if self.music.playing else None)
@@ -438,3 +563,10 @@ class GameApp:
                 "   —   Pressione R para jogar novamente")
         small = self.renderer.font(28).render(info, True, COLORS["text"])
         self.screen.blit(small, small.get_rect(center=(self.viewport.centerx, self.viewport.centery + 30)))
+        y = self.viewport.centery + 64
+        for h in self.world.heroes:
+            text = (f"P{h.owner or '-'} {h.name} ({h.role}) - nível {h.level}, {h.xp} XP, "
+                    f"{h.kills} abate(s)")
+            img = self.renderer.font(24).render(text, True, h.color)
+            self.screen.blit(img, img.get_rect(center=(self.viewport.centerx, y)))
+            y += 26

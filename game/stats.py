@@ -3,6 +3,7 @@
 * `data/buildings.csv`, `data/units.csv`, `data/zombies.csv` – uma linha por tipo, `id` como chave.
 * `data/waves.csv` – cronograma de ondas (turno, direção, tipo, enxames, tamanho).
 * `data/crates.csv` – caixas de recursos espalhadas pelo mapa (conteúdo e raridade).
+* `data/heroes.csv` / `data/skills.csv` – heróis (um por papel) e suas habilidades.
 * Aceita separador `,` ou `;` e, com `;`, vírgula decimal (formato do Excel em pt-BR).
 * Colunas `notes`/`description` são livres; colunas desconhecidas geram erro (evita typos).
 * Erros viram `StatsError` com arquivo, linha e coluna.
@@ -122,6 +123,48 @@ class CrateStats:
                                   ("stone", self.stone)) if v > 0}
 
 
+@dataclass(frozen=True)
+class HeroStats:
+    """Herói (`data/heroes.csv`); `id` é o papel e define as habilidades (skills.csv)."""
+    id: str
+    name: str
+    role: str
+    symbol: str
+    hp: int
+    move: int
+    attack_range: int
+    damage: int
+    armor: int = 0              # reduz cada golpe recebido (mínimo 1 de dano)
+    noise: int = 0
+    vision: int = 4
+    mana: int = 0
+    mana_regen: int = 0
+    hp_per_level: int = 0
+    damage_per_level: int = 0
+    mana_per_level: int = 0
+    color: Color = (200, 200, 220)
+    notes: str = ""
+
+
+@dataclass(frozen=True)
+class SkillStats:
+    """Habilidade de herói (`data/skills.csv`); `id` define o efeito implementado."""
+    id: str
+    hero: str
+    name: str
+    ap: int = 1
+    cooldown: int = 0          # turnos de recarga após o uso
+    mana: int = 0
+    range: int = 0             # alcance do alvo (Chebyshev; 'line' usa linha/coluna)
+    radius: int = 0            # raio da área (Chebyshev)
+    power: int = 0             # dano / cura / armadura / empurrão / raio de ruído
+    per_level: int = 0         # power extra por nível acima do 1
+    duration: int = 0          # turnos de efeito
+    noise: int = 0             # ruído emitido pelo herói ao usar
+    target: str = "self"       # self, enemy, ally, tile, line, move
+    notes: str = ""
+
+
 # lado da grade: 0 = norte (y=0), 1 = sul, 2 = oeste (x=0), 3 = leste
 DIRECTIONS = {"N": 0, "S": 1, "O": 2, "W": 2, "L": 3, "E": 3}
 DIRECTION_NAMES = {0: "Norte", 1: "Sul", 2: "Oeste", 3: "Leste"}
@@ -143,6 +186,11 @@ REQUIRED_BUILDINGS = {"hq", "tent", "wall", "ballista", "tesla", "watchtower", "
                       "infected"}
 HARVEST_KINDS = {"wood", "stone"}
 REQUIRED_UNITS = {"soldier", "ranger"}
+REQUIRED_HEROES = {"tank", "ranged", "rogue", "healer", "mage"}
+SKILL_EFFECTS = {"taunt": "tank", "guard": "tank", "pierce": "ranged", "snipe": "ranged",
+                 "stealth": "rogue", "shove": "rogue", "lure": "rogue", "heal": "healer",
+                 "heal_aoe": "healer", "fireball": "mage", "root": "mage", "blink": "mage"}
+SKILL_TARGETS = {"self", "enemy", "ally", "tile", "line", "move"}
 REQUIRED_ZOMBIES = {"walker"}  # gerado por Casas Infectadas
 TRUE = {"1", "true", "sim", "s", "yes", "y", "x"}
 FALSE = {"0", "false", "nao", "não", "n", "no", ""}
@@ -287,6 +335,21 @@ class GameStats:
     zombies: dict[str, ZombieSpec]
     waves: list[WaveRow]
     crates: dict[str, CrateStats] = dataclasses.field(default_factory=dict)
+    heroes: dict[str, HeroStats] = dataclasses.field(default_factory=dict)
+    skills: dict[str, SkillStats] = dataclasses.field(default_factory=dict)
+
+
+def _check_skills(skills: dict[str, SkillStats]) -> dict[str, SkillStats]:
+    for s in skills.values():
+        if s.hero != SKILL_EFFECTS[s.id]:
+            raise StatsError(f"skills.csv: '{s.id}' pertence ao herói '{SKILL_EFFECTS[s.id]}' "
+                             f"(recebido '{s.hero}').")
+        if s.target not in SKILL_TARGETS:
+            raise StatsError(f"skills.csv: '{s.id}' tem target inválido '{s.target}' "
+                             f"(use {', '.join(sorted(SKILL_TARGETS))}).")
+        if s.target != "self" and s.range < 1:
+            raise StatsError(f"skills.csv: '{s.id}' precisa de range >= 1.")
+    return skills
 
 
 def _check_crates(crates: dict[str, CrateStats]) -> dict[str, CrateStats]:
@@ -329,7 +392,11 @@ def load_stats(folder: Path = DATA_DIR) -> GameStats:
         if buildings[kind].buildable:
             raise StatsError(f"buildings.csv: '{kind}' não pode ter buildable=1.")
     crates = _check_crates(read_table(folder / "crates.csv", CrateStats))
-    return GameStats(buildings, units, zombies, waves, crates)
+    heroes = read_table(folder / "heroes.csv", HeroStats)
+    _check_ids("heroes.csv", heroes, REQUIRED_HEROES, exact=True)
+    skills = read_table(folder / "skills.csv", SkillStats)
+    _check_ids("skills.csv", skills, set(SKILL_EFFECTS), exact=True)
+    return GameStats(buildings, units, zombies, waves, crates, heroes, _check_skills(skills))
 
 
 STATS = load_stats()
@@ -339,6 +406,11 @@ ZOMBIE_SPECS: dict[str, ZombieSpec] = STATS.zombies
 # cronograma de ondas (ordenado por turno); direções "?" são sorteadas no início da partida
 WAVE_SCHEDULE: list[WaveRow] = STATS.waves
 CRATE_SPECS: dict[str, CrateStats] = STATS.crates
+HERO_SPECS: dict[str, HeroStats] = STATS.heroes
+SKILL_SPECS: dict[str, SkillStats] = STATS.skills
+# habilidades de cada herói, na ordem do CSV (atalhos Q, E, R)
+HERO_SKILLS: dict[str, list[SkillStats]] = {h: [s for s in SKILL_SPECS.values() if s.hero == h]
+                                            for h in HERO_SPECS}
 # construções que o jogador pode erguer (botões/atalhos)
 BUILD_SPECS: dict[str, BuildingStats] = {k: v for k, v in BUILDING_STATS.items() if v.buildable}
 VISION_RADIUS: dict[str, int] = {**{k: v.vision for k, v in BUILDING_STATS.items()},

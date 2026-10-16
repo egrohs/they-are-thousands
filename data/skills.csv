@@ -1,0 +1,13 @@
+id,hero,name,ap,cooldown,mana,range,radius,power,per_level,duration,noise,target,notes
+taunt,tank,Provocar,1,2,0,0,3,0,0,1,3,self,Enxames no raio perseguem e atacam o Guardião no próximo turno inimigo
+guard,tank,Postura Defensiva,1,3,0,0,0,2,1,1,0,self,+power de armadura até o próximo turno
+pierce,ranged,Tiro Perfurante,1,2,0,5,0,4,1,0,4,line,Atinge todos os enxames visíveis em linha reta (mesma linha/coluna)
+snipe,ranged,Tiro Certeiro,1,3,0,7,0,8,2,0,4,enemy,Disparo de longo alcance em um enxame visível
+stealth,rogue,Furtividade,1,3,0,0,0,0,0,2,0,self,Zumbis ignoram a Sombra por N turnos (atacar revela)
+shove,rogue,Empurrão,1,2,0,1,0,2,0,0,1,enemy,Empurra um enxame adjacente power tiles; bater em obstáculo causa 1 de dano
+lure,rogue,Isca Sonora,1,3,0,6,0,5,0,0,0,tile,Ruído de raio power no tile alvo: atrai os zumbis para lá
+heal,healer,Curar,1,0,0,3,0,5,1,0,0,ally,Cura um aliado (unidade ou herói)
+heal_aoe,healer,Onda Restauradora,2,3,0,0,2,3,1,0,1,self,Cura todos os aliados no raio
+fireball,mage,Bola de Fogo,1,0,3,4,1,3,1,0,4,tile,Dano em todos os enxames na área
+root,mage,Raízes,1,0,2,4,1,0,0,1,1,tile,Enxames na área não andam no próximo turno inimigo
+blink,mage,Teleporte,0,0,2,4,0,0,0,0,0,move,Teleporta para um tile livre conhecido

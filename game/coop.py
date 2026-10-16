@@ -9,6 +9,8 @@ estado é enviado pelo anfitrião e, se divergir, o cliente pede ressincronizaç
 
 Qualquer jogador pode fazer qualquer ação (construir, mover/atacar com qualquer unidade,
 desfazer, encerrar turno, alternar névoa). Recursos, AP e visão são compartilhados.
+Exceção: cada jogador escolhe e comanda apenas o próprio herói (`by` de cada comando);
+quem sai da partida deixa o herói sem dono, e qualquer um pode comandá-lo/assumi-lo.
 Sem dependência de pygame.
 """
 from __future__ import annotations
@@ -19,15 +21,16 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from .config import (DATA_DIR, NET_MAX_PLAYERS, NET_PORT, PHASE_DELAY)
+from .entities import Hero
 from .grid import Pos
 from .net import ClientTransport, HostTransport, NetError, parse_address
-from .stats import BUILD_SPECS
+from .stats import BUILD_SPECS, HERO_SPECS, SKILL_SPECS
 from .turns import TurnManager
 from .world import World
 
-PROTOCOL_VERSION = 1
-UNIT_OPS = ("move", "attack", "gather")
-OPS = ("build", "repair", "undo", "end_turn", "fog", *UNIT_OPS)
+PROTOCOL_VERSION = 2
+UNIT_OPS = ("move", "attack", "gather", "revive")
+OPS = ("build", "repair", "undo", "end_turn", "fog", "hero", "skill", "release", *UNIT_OPS)
 
 
 def data_fingerprint() -> str:
@@ -77,15 +80,32 @@ def _pos(value: Any, world: World) -> Optional[Pos]:
 
 
 def validate_command(cmd: Any, world: World) -> Optional[dict]:
-    """Normaliza um comando recebido da rede; None se estiver malformado."""
+    """Normaliza um comando recebido da rede; None se estiver malformado.
+    `by` é o jogador que emitiu o comando (o anfitrião sobrescreve com o remetente real)."""
     if not isinstance(cmd, dict) or cmd.get("op") not in OPS:
         return None
+    by = cmd.get("by", 1)
+    if type(by) is not int or by < 0:
+        return None
+    valid = _validate(cmd, world)
+    if valid is not None:
+        valid["by"] = by
+    return valid
+
+
+def _validate(cmd: dict, world: World) -> Optional[dict]:
     op = cmd["op"]
     if op in ("undo", "end_turn"):
         return {"op": op}
     if op == "fog":
         enabled = cmd.get("enabled")
         return {"op": op, "enabled": enabled} if type(enabled) is bool else None
+    if op == "hero":
+        role = cmd.get("role")
+        return {"op": op, "role": role} if isinstance(role, str) and role in HERO_SPECS else None
+    if op == "release":
+        player = cmd.get("player")
+        return {"op": op, "player": player} if type(player) is int and player > 0 else None
     if op == "build":
         pos, kind = _pos(cmd.get("pos"), world), cmd.get("kind")
         if pos is None or not isinstance(kind, str) or kind not in BUILD_SPECS:
@@ -97,6 +117,11 @@ def validate_command(cmd: Any, world: World) -> Optional[dict]:
     src, dst = _pos(cmd.get("from"), world), _pos(cmd.get("to"), world)
     if src is None or dst is None:
         return None
+    if op == "skill":
+        skill = cmd.get("skill")
+        if not isinstance(skill, str) or skill not in SKILL_SPECS:
+            return None
+        return {"op": op, "skill": skill, "from": list(src), "to": list(dst)}
     return {"op": op, "from": list(src), "to": list(dst)}
 
 
@@ -106,10 +131,15 @@ def apply_command(world: World, turns: TurnManager, cmd: dict) -> bool:
     if turns.busy:
         turns.resolve_instantly()
     op = cmd["op"]
+    by = cmd.get("by", 1)
     if op == "fog":
         world.fog.enabled = cmd["enabled"]
         world.update_fog()
         return True
+    if op == "release":
+        return world.release_heroes(cmd["player"]) > 0
+    if op == "hero":
+        return world.pick_hero(cmd["role"], by)
     if not turns.is_player_phase:
         return False
     if op == "end_turn":
@@ -125,6 +155,16 @@ def apply_command(world: World, turns: TurnManager, cmd: dict) -> bool:
     if unit is None:
         world.message(f"Nenhuma unidade em {src}.")
         return False
+    if not world.can_control(unit, by):
+        world.message(f"{unit.name} é comandado(a) por P{getattr(unit, 'owner', '?')}.")
+        return False
+    if op == "skill":
+        if not isinstance(unit, Hero):
+            world.message(f"{unit.name} não tem habilidades.")
+            return False
+        return world.use_skill(unit, cmd["skill"], dst)
+    if op == "revive":
+        return world.revive_hero(unit, dst)
     if op == "move":
         return world.move_unit(unit, dst)
     if op == "attack":
@@ -139,6 +179,10 @@ def world_checksum(world: World) -> str:
         world.zombies_killed, world.crates_found, world.final_horde_spawned, world.fog.enabled,
         len(world.history), world.rng.getstate(), len(world.pending_noise),
         sorted(world.fog.explored),
+        [(h.hero_id, h.owner, h.pos, h.hp, h.max_hp, h.xp, h.level, h.mana, h.state,
+          h.downed_turns, h.downed_fresh, h.recover_turns, h.debuff_turns, h.stealth_turns,
+          h.guard_turns, h.guard_armor, h.moved, h.acted, sorted(h.cooldowns.items()))
+         for h in world.heroes],
     ]
     for t in world.grid:
         b, u, s = t.building, t.unit, t.swarm
@@ -146,7 +190,8 @@ def world_checksum(world: World) -> str:
             t.terrain.name, t.resource_amount, t.crate,
             (type(b).__name__, b.hp) if b else None,
             (type(u).__name__, u.hp, u.moved, u.acted) if u else None,
-            (s.kind, s.count, s.wounds, s.aggressive, s.noise_target) if s else None,
+            (s.kind, s.count, s.wounds, s.aggressive, s.noise_target, s.taunt_hero,
+             s.taunt_turns, s.rooted_turns) if s else None,
         ))
     return hashlib.sha1(repr(parts).encode()).hexdigest()[:16]
 
@@ -198,7 +243,15 @@ class Session:
         session.phase_delay = other.phase_delay
         session.player_id = 1
         session.peer_cursors = {}
-        return session.adopt(other)
+        session.adopt(other)
+        # offline, o jogador local vira P1: assume o próprio herói e os demais ficam sem dono
+        # (via comandos, para o histórico continuar reproduzível se hospedar depois)
+        mine = session.world.hero_of(other.player_id)
+        for owner in sorted({h.owner for h in session.world.heroes if h.owner}):
+            session.submit({"op": "release", "player": owner})
+        if mine is not None:
+            session.submit({"op": "hero", "role": mine.hero_id})
+        return session
 
     def new_game(self, setup: GameSetup) -> bool:
         self.start(setup)
@@ -210,7 +263,7 @@ class Session:
 
     # --- ações ---------------------------------------------------------------
     def submit(self, cmd: dict) -> None:
-        valid = validate_command(cmd, self.world)
+        valid = validate_command({**cmd, "by": self.player_id}, self.world)
         if valid is not None:
             apply_command(self.world, self.turns, valid)
             self.log.append(valid)
@@ -278,6 +331,7 @@ class HostSession(Session):
         valid = validate_command(cmd, self.world)
         if valid is None:
             return
+        valid["by"] = by
         if self.turns.busy:
             self.turns.resolve_instantly()
             self._send_check()
@@ -319,6 +373,8 @@ class HostSession(Session):
                     self._broadcast_players()
                     self.transport.broadcast({"t": "cursor", "id": pid, "pos": None},
                                              to=set(self.players))
+                    if self.world.hero_of(pid) is not None:
+                        self._execute({"op": "release", "player": pid}, 1)
             elif kind == "msg":
                 self._handle(pid, data)
 

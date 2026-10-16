@@ -9,10 +9,10 @@ import pygame
 
 from .config import (COLORS, EXHAUSTED_TINT, INFECTED_TINT, PLAYER_COLORS, TILE_SIZE,
                      WAVE_EDGE_SPREAD, WAVE_WARNING_TURNS, ZOMBIE_TINTS)
-from .entities import Building, Unit, ZombieSwarm
+from .entities import Building, Hero, Unit, ZombieSwarm
 from .grid import Pos, Terrain
 from .sprites import SpriteManager
-from .stats import BUILD_SPECS, CRATE_SPECS, DIRECTION_NAMES
+from .stats import BUILD_SPECS, CRATE_SPECS, DIRECTION_NAMES, SKILL_SPECS
 from .world import World, edge_pos
 
 
@@ -30,8 +30,22 @@ class UIState:
     move_tiles: set[Pos] = field(default_factory=set)
     attack_tiles: set[Pos] = field(default_factory=set)
     gather_tiles: set[Pos] = field(default_factory=set)
+    skill: Optional[str] = None                                 # habilidade de herói mirando
+    skill_tiles: set[Pos] = field(default_factory=set)
+    revive_tiles: set[Pos] = field(default_factory=set)
+    player_id: int = 1
     peer_cursors: dict[int, Pos] = field(default_factory=dict)  # co-op: id do jogador -> tile
     net_status: str = ""
+
+
+def unit_color(u: Unit) -> tuple[int, int, int]:
+    """Cor de destaque da unidade (heróis têm cor própria no CSV)."""
+    return u.color if isinstance(u, Hero) else COLORS[u.color_key]
+
+
+def player_color(pid: int) -> tuple[int, int, int]:
+    return PLAYER_COLORS[(pid - 1) % len(PLAYER_COLORS)] if pid > 0 else COLORS["text_dim"]
+
 
 class Camera:
     MIN_ZOOM = 0.5
@@ -200,6 +214,7 @@ class Renderer:
                 self._draw_unit(surface, urect, t.unit, urect.w, t.unit is ui.selected_unit)
             if t.swarm is not None and fog.is_visible(t.pos):
                 self._draw_swarm(surface, rect, t.swarm, ts)
+                self._draw_swarm_status(surface, rect, t.swarm, ts)
 
         self._draw_pending_noise(surface, world, cam)
         self._draw_wave_warning(surface, world, cam)
@@ -210,6 +225,12 @@ class Renderer:
             if eff.color_key == "loot":
                 rect = cam.tile_rect(eff.end)
                 pygame.draw.circle(surface, COLORS["gold"], rect.center, int(ts * 0.48), 2)
+                continue
+            if eff.start == eff.end:  # efeito no próprio tile (cura, provocação, nível...)
+                rect = cam.tile_rect(eff.end)
+                radius = int(ts * (1.4 if eff.color_key == "taunt" else 0.55))
+                pygame.draw.circle(surface, COLORS[eff.color_key], rect.center, radius,
+                                   max(2, int(ts / 12)))
                 continue
             a = cam.tile_rect(eff.start).center
             b = cam.tile_rect(eff.end).center
@@ -310,6 +331,23 @@ class Renderer:
             rect = cam.tile_rect(p)
             self._overlay(surface, rect, COLORS["attack"], 70)
             pygame.draw.rect(surface, COLORS["attack"], rect, 2)
+        for p in ui.revive_tiles:
+            rect = cam.tile_rect(p)
+            self._overlay(surface, rect, COLORS["heal"], 70)
+            pygame.draw.rect(surface, COLORS["heal"], rect, 2)
+        for p in ui.skill_tiles:
+            self._overlay(surface, cam.tile_rect(p), COLORS["skill"], 60)
+        skill = SKILL_SPECS.get(ui.skill or "")
+        if skill is not None and ui.hover_tile in ui.skill_tiles:
+            hover = ui.hover_tile
+            assert hover is not None
+            if skill.radius > 0:
+                r = skill.radius
+                tl = cam.tile_rect((hover[0] - r, hover[1] - r)).topleft
+                br = cam.tile_rect((hover[0] + r, hover[1] + r)).bottomright
+                pygame.draw.rect(surface, COLORS["skill"],
+                                 pygame.Rect(tl, (br[0] - tl[0], br[1] - tl[1])), 2)
+            pygame.draw.rect(surface, COLORS["skill"], cam.tile_rect(hover), 3)
 
         if ui.selected_unit is not None and ui.selected_unit.alive:
             u = ui.selected_unit
@@ -389,6 +427,9 @@ class Renderer:
         pygame.draw.rect(surface, (0, 0, 0), deck, 1)
 
     def _draw_unit(self, surface, rect: pygame.Rect, u: Unit, ts, selected: bool) -> None:
+        if isinstance(u, Hero):
+            self._draw_hero(surface, rect, u, ts, selected)
+            return
         dest = self._sprite(surface, u.kind, rect, EXHAUSTED_TINT if u.exhausted else None)
         if dest is not None:
             border = COLORS["select"] if selected else COLORS[u.color_key]
@@ -409,6 +450,59 @@ class Renderer:
         if not u.acted:
             pygame.draw.circle(surface, COLORS["attack"], (rect.right - dot - 2, rect.top + dot + 2), dot)
         self._hp_bar(surface, rect, u.hp, u.max_hp)
+
+    def _draw_hero(self, surface, rect: pygame.Rect, h: Hero, ts, selected: bool) -> None:
+        """Herói: escudo na cor do papel, símbolo, nível, dono (P1..) e estado."""
+        cx, cy = rect.centerx, rect.centery - int(ts * 0.03)
+        r = ts * 0.4
+        shield = [(cx - r, cy - r * 0.8), (cx + r, cy - r * 0.8), (cx + r, cy + r * 0.1),
+                  (cx, cy + r), (cx - r, cy + r * 0.1)]
+        color = h.color
+        if h.downed:
+            color = COLORS["downed"]
+        elif h.exhausted:
+            color = tuple(c // 2 for c in color)
+        if h.stealthed:  # furtiva: só o contorno, translúcida
+            layer = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+            pygame.draw.polygon(layer, (*color, 90), shield)
+            surface.blit(layer, (0, 0))
+            pygame.draw.polygon(surface, color, shield, 2)
+        else:
+            pygame.draw.polygon(surface, color, shield)
+        outline = COLORS["select"] if selected else (0, 0, 0)
+        pygame.draw.polygon(surface, outline, shield, 3 if selected else 2)
+        if h.downed:
+            d = int(r * 0.6)
+            pygame.draw.line(surface, COLORS["defeat"], (cx - d, cy - d), (cx + d, cy + d), 3)
+            pygame.draw.line(surface, COLORS["defeat"], (cx - d, cy + d), (cx + d, cy - d), 3)
+            self._text(surface, str(h.downed_turns), (cx, cy), ts * 0.5, COLORS["text"])
+        else:
+            self._text(surface, h.symbol, (cx, cy - int(ts * 0.04)), ts * 0.5)
+            dot = max(2, int(ts * 0.07))
+            if not h.moved:
+                pygame.draw.circle(surface, COLORS["move"], (rect.left + dot + 2, rect.top + dot + 2), dot)
+            if not h.acted:
+                pygame.draw.circle(surface, COLORS["attack"], (rect.right - dot - 2, rect.top + dot + 2), dot)
+            self._hp_bar(surface, rect, h.hp, h.max_hp)
+        if ts >= 18:
+            small = max(11, int(ts * 0.3))
+            lvl = self.font(small).render(str(h.level), True, (0, 0, 0))
+            badge = lvl.get_rect(bottomleft=(rect.left + 2, rect.bottom - max(3, rect.h // 9) - 3))
+            pygame.draw.rect(surface, COLORS["gold"], badge.inflate(4, 0), border_radius=3)
+            surface.blit(lvl, badge)
+            tag = self.font(small).render(f"P{h.owner}" if h.owner else "-", True, player_color(h.owner))
+            back = tag.get_rect(midbottom=(rect.centerx, rect.top + 1)).inflate(4, 0)
+            self._overlay(surface, back, (0, 0, 0), 160)
+            surface.blit(tag, tag.get_rect(center=back.center))
+        if h.debuffed and not h.downed:
+            pygame.draw.circle(surface, COLORS["defeat"], (rect.right - 4, rect.bottom - 8), max(2, int(ts * 0.06)))
+
+    def _draw_swarm_status(self, surface, rect: pygame.Rect, s: ZombieSwarm, ts) -> None:
+        if s.rooted_turns > 0:
+            pygame.draw.rect(surface, COLORS["heal"], rect.inflate(-2, -2), 2, border_radius=4)
+        if s.taunt_turns > 0 and ts >= 16:
+            self._text(surface, "!", (rect.left + int(ts * 0.15), rect.bottom - int(ts * 0.22)),
+                       ts * 0.5, COLORS["taunt"])
 
     def _draw_swarm(self, surface, rect: pygame.Rect, s: ZombieSwarm, ts) -> None:
         border = COLORS["zombie_noise"] if s.noise_target is not None else (0, 0, 0)

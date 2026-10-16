@@ -65,14 +65,20 @@ class CommandTests(unittest.TestCase):
             self.assertIsNone(validate_command(cmd, self.world), cmd)
 
     def test_validation_normalizes(self):
-        self.assertEqual(validate_command({"op": "undo", "extra": 1}, self.world), {"op": "undo"})
-        self.assertEqual(validate_command({"op": "move", "from": (1, 2), "to": [3, 4]}, self.world),
-                         {"op": "move", "from": [1, 2], "to": [3, 4]})
+        self.assertEqual(validate_command({"op": "undo", "extra": 1}, self.world),
+                         {"op": "undo", "by": 1})
+        self.assertEqual(validate_command({"op": "move", "from": (1, 2), "to": [3, 4], "by": 2},
+                                          self.world),
+                         {"op": "move", "from": [1, 2], "to": [3, 4], "by": 2})
+        self.assertIsNone(validate_command({"op": "undo", "by": "P2"}, self.world))
+        self.assertIsNone(validate_command({"op": "hero", "role": "dragon"}, self.world))
+        self.assertIsNone(validate_command({"op": "skill", "skill": "nuke", "from": [1, 1],
+                                            "to": [1, 1]}, self.world))
 
     def test_fog_is_a_shared_command(self):
         self.session.submit({"op": "fog", "enabled": False})
         self.assertFalse(self.world.fog.enabled)
-        self.assertEqual(self.session.log[-1], {"op": "fog", "enabled": False})
+        self.assertEqual(self.session.log[-1], {"op": "fog", "enabled": False, "by": 1})
 
     def test_command_during_enemy_phase_resolves_it_first(self):
         self.session.submit({"op": "end_turn"})

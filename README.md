@@ -21,7 +21,10 @@ python -m unittest discover -s tests -t .
 |---|---|
 | Clique em unidade | Seleciona (azul = mover, vermelho = atacar, amarelo = coletar) |
 | `1` … `8` / botões | Construir Muro / Tenda / Balista, Reparar, Construir Tesla / Torre de Vigia / Serraria / Extrator de Pedra |
-| `Esc` | Cancela modo/seleção; sem seleção abre o menu (pausa no solo; no co-op o jogo segue) |
+| `H` / botão | Seleciona seu herói (centraliza a câmera) |
+| `Q` `E` `R` / botões | Habilidades do herói selecionado (sem alvo = uso imediato; demais = clique no tile roxo) |
+| `1` … `5` (tela inicial) | Escolhe o herói |
+| `Esc` | Cancela mira/modo/seleção; sem seleção abre o menu (pausa no solo; no co-op o jogo segue) |
 | `F` / item do menu | Liga/desliga a névoa de guerra |
 | `M` / item do menu | Liga/desliga a música |
 | `-` `+` (menu: `←` `→`) | Volume da música |
@@ -56,7 +59,8 @@ Até 4 jogadores na mesma partida, cooperando contra a horda:
 Regras do co-op:
 - **Tudo é compartilhado:** ouro/madeira/pedra, AP do turno, unidades, construções e visão (névoa).
   Qualquer jogador pode construir, mover/atacar com qualquer unidade, desfazer, alternar a névoa
-  e **encerrar o turno**.
+  e **encerrar o turno**. Exceção: cada um comanda **só o próprio herói** (veja *Heróis*); o
+  herói de quem sai fica sem dono e pode ser assumido por outro jogador.
 - Cada jogador vê o cursor dos outros (`P1` = anfitrião, `P2`…); o HUD mostra `Co-op HOST · 3J`.
 - Só o anfitrião escolhe mapa, inicia **Nova Partida** (inclusive pelo editor) ou reinicia (`R`).
 - Quem entra no meio da partida recebe o estado atual. Se o anfitrião cair, o convidado continua
@@ -69,6 +73,32 @@ Como funciona (`game/coop.py`, `game/net.py`): *lockstep* determinístico. Toda 
 comando JSON; o anfitrião o valida, aplica e retransmite numerado para todos, que o aplicam na
 mesma ordem sobre o mesmo mundo (mesma semente). Um checksum do estado é conferido após cada
 comando/turno; se divergir, o convidado é ressincronizado automaticamente (replay do histórico).
+
+## Heróis
+
+No início da partida cada jogador escolhe **um herói** (solo = 1; co-op = 1 por jogador, sem
+repetição). O herói surge ao lado do CC e só pode ser comandado pelo dono (`P#` no sprite). Como
+as demais unidades, ele move e faz **uma ação por turno** (ataque, habilidade ou resgate).
+
+| Herói | Papel | Destaques | Habilidades |
+|---|---|---|---|
+| Guardião | Tanque | HP 14, armadura 2 (reduz cada golpe, mín. 1) | **Provocar** (enxames no raio 3 perseguem e atacam só ele no próximo turno inimigo) · **Postura Defensiva** (+2 armadura) |
+| Atiradora | DPS à distância | Dano 5, alcance 5, pouca vida | **Tiro Perfurante** (atinge todos os enxames na linha) · **Tiro Certeiro** (alcance 7, dano 8) |
+| Sombra | Controle (Rogue) | Mov 5, silenciosa | **Furtividade** (zumbis a ignoram; atacar revela) · **Empurrão** (afasta um enxame; bater em obstáculo causa dano) · **Isca Sonora** (barulho num tile distante atrai a horda) |
+| Médica | Suporte / Cura | Resgata com mais vida (60%) | **Curar** (aliado único) · **Onda Restauradora** (cura em área) |
+| Arcanista | Mago | Mana 6 (+2/turno) | **Bola de Fogo** (dano em área) · **Raízes** (enxames não andam no próximo turno) · **Teleporte** |
+
+- Habilidades custam AP e/ou mana e têm recarga (mostradas nos botões); só atingem tiles visíveis.
+- **XP:** +1 por zumbi abatido, +1 por habilidade usada, +3 por resgate, +1 por turno sobrevivido.
+  Níveis 1–5 (`HERO_LEVEL_XP` em `config.py`): cada nível dá HP, dano, mana e potência de habilidade
+  (`*_per_level` nos CSVs).
+- **Caído (etapa 1):** com HP 0 o herói fica no chão por 2 turnos (os zumbis o ignoram). Uma unidade
+  aliada adjacente que ainda não agiu gasta **2 AP** e o levanta com 30% de vida (tile verde).
+- **Capturado (etapa 2):** sem resgate, ele sai do mapa e fica **3 turnos em convalescença** na base.
+  Volta ao lado do CC com 50% de vida, perde metade do XP do nível atual e fica 3 turnos com
+  *debuff* (−1 dano e −1 movimento).
+- Usar habilidades e resgatar pode ser desfeito como as outras ações.
+- Stats em `data/heroes.csv` e `data/skills.csv` (veja *Balanceamento*).
 
 ## Editor de mapas
 Menu → **Editor de Mapas** (`E`) ou `python main.py --editor`.
@@ -212,6 +242,8 @@ Edite no Excel/LibreOffice ou num editor de texto e **reinicie o jogo** para apl
 |---|---|
 | `data/buildings.csv` | `buildable` (aparece nos botões), custo `ap/gold/wood/stone`, `hp`, `noise` (ao construir), `gold_income`, `vision`, `build_radius` (território), `attack_range`/`damage`/`attack_noise` (defesa automática), `spawn` (Casa Infectada), `garrison`/`range_bonus`/`vision_bonus` (abrigo de unidade e bônus concedidos — Torre de Vigia), `harvest` (`wood`/`stone`)/`harvest_radius`/`harvest_tiles` (tiles por 1 recurso)/`harvest_max` (extratores) |
 | `data/units.csv` | `hp`, `move`, `attack_range`, `damage`, `noise` (ao atacar), `vision` |
+| `data/heroes.csv` | `role`, `hp`, `armor`, `move`, `attack_range`, `damage`, `noise`, `vision`, `mana`/`mana_regen`, ganho por nível (`hp_per_level`, `damage_per_level`, `mana_per_level`), `color`, `notes` (sem vírgulas) |
+| `data/skills.csv` | `hero`, custo (`ap`, `mana`), `cooldown`, `range`, `radius`, `power` (+`per_level`), `duration`, `noise`, `target` (`self`/`enemy`/`ally`/`tile`/`line`/`move`) |
 | `data/zombies.csv` | `hp` (por zumbi), `speed`, `attack` (dano por zumbi), `max_stack` (≤ 10), `attack_range`, `structure_mult`, `flying`, `hearing`, `color` (`#rrggbb`), `description` |
 | `data/crates.csv` | caixas de recursos: `weight` (raridade; 0 = só no editor), `gold`/`wood`/`stone` (conteúdo), `noise` (alarme ao abrir), `min_dist` (distância mínima do centro), `color` (#rrggbb). Quantidade e espaçamento: `CRATE_COUNT`/`CRATE_SPACING` em `config.py` |
 | `data/waves.csv` | `turn` (chega ao fim dele), `direction` (`N`, `S`, `L`, `O` ou `?` = sorteada; `?1`/`?2` = bordas sorteadas distintas no mesmo turno), `kind`, `swarms`, `size`, `final` (1 = horda final, um único turno) |
@@ -226,7 +258,7 @@ Edite no Excel/LibreOffice ou num editor de texto e **reinicie o jogo** para apl
 - Regras gerais (AP por turno, recursos iniciais, reparo/coleta, aviso de ondas) continuam em `game/config.py`.
 
 ## Estrutura
-- `data/*.csv` – stats de construções, unidades e zumbis + cronograma de ondas (balanceamento)
+- `data/*.csv` – stats de construções, unidades, heróis/habilidades e zumbis + cronograma de ondas (balanceamento)
 - `game/stats.py` – leitura/validação dos CSVs
 - `game/config.py` – regras gerais, layout, cores
 - `game/grid.py` – `Grid`, `Tile`, `Terrain`, distâncias, BFS/Dijkstra
@@ -242,5 +274,6 @@ Edite no Excel/LibreOffice ou num editor de texto e **reinicie o jogo** para apl
 - `game/sprites.py` – carregamento/cache das imagens de unidades e construções
 - `game/maps.py` – formato JSON de mapas, validação, salvar/carregar (`maps/`)
 - `game/editor.py` – editor de mapas (`MapEditor` lógica + `EditorScreen` interface)
+- `game/heropick.py` – tela de escolha de herói
 - `game/menu.py` – menu inicial/pausa e configurações
 - `game/app.py` – loop principal e entrada

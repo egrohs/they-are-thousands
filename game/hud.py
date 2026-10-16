@@ -6,11 +6,12 @@ from typing import Optional
 
 import pygame
 
-from .config import (COLORS, MAX_TURNS, REPAIR_AMOUNT, REPAIR_AP,
-                     REPAIR_WOOD,                      RESOURCE_LABELS)
+from .config import (COLORS, HERO_REVIVE_AP, MAX_TURNS, REPAIR_AMOUNT, REPAIR_AP,
+                     REPAIR_WOOD, RESOURCE_LABELS)
+from .entities import Hero
 from .grid import Pos
-from .renderer import UIState
-from .stats import BUILDING_STATS, CRATE_SPECS
+from .renderer import UIState, unit_color
+from .stats import BUILDING_STATS, CRATE_SPECS, HERO_SPECS
 from .turns import TurnManager
 from .world import World
 
@@ -38,7 +39,13 @@ class Button:
         label = fonts.font(22).render(self.label, True, text_color)
         if self.sub_label:
             surface.blit(label, (self.rect.x + 8, self.rect.y + 4))
-            sub = fonts.font(17).render(self.sub_label, True, COLORS["text_dim"])
+            font = fonts.font(17)
+            text, max_w = self.sub_label, self.rect.w - 16
+            if font.size(text)[0] > max_w:
+                while text and font.size(text + "…")[0] > max_w:
+                    text = text[:-1]
+                text = text.rstrip() + "…"
+            sub = font.render(text, True, COLORS["text_dim"])
             surface.blit(sub, (self.rect.x + 8, self.rect.bottom - sub.get_height() - 4))
         else:
             surface.blit(label, label.get_rect(center=self.rect.center))
@@ -110,6 +117,24 @@ class HUD:
         ]
         self.info_top = y + 250
         self.menu_button = Button(pygame.Rect(rect.right - 84, 10, 72, 26), "Menu", "menu")
+        self.active_buttons: list[Button] = self.buttons
+        self._skill_rows = [pygame.Rect(x, y + 50 * i, w, 44) for i in range(3)]
+        self._hero_row = (pygame.Rect(x, y + 150, half, 44), pygame.Rect(x + half + 8, y + 150, half, 44))
+
+    def _hero_buttons(self, world: World, hero: Hero) -> list[Button]:
+        buttons: list[Button] = []
+        for i, (skill, rect) in enumerate(zip(world.hero_skills(hero), self._skill_rows)):
+            cost = [f"{skill.ap} AP"]
+            if skill.mana:
+                cost.append(f"{skill.mana} mana")
+            cd = hero.cooldown(skill.id)
+            cost.append(f"recarga {cd}" if cd else
+                        (f"recarga {skill.cooldown}t" if skill.cooldown else "sem recarga"))
+            buttons.append(Button(rect, f"[{'QER'[i]}] {skill.name}", f"skill:{i}",
+                                  " | ".join(cost) + f" - {skill.notes}"))
+        buttons.append(Button(self._hero_row[0], "[H] Meu herói", "my_hero"))
+        buttons.append(Button(self._hero_row[1], "Construções [Esc]", "deselect"))
+        return buttons
 
     def font(self, size: int) -> pygame.font.Font:
         if size not in self._fonts:
@@ -119,7 +144,7 @@ class HUD:
     def button_at(self, pos: tuple[int, int]) -> Optional[Button]:
         if self.menu_button.rect.collidepoint(pos):
             return self.menu_button
-        return next((b for b in self.buttons if b.rect.collidepoint(pos)), None)
+        return next((b for b in self.active_buttons if b.rect.collidepoint(pos)), None)
 
     def _line(self, surface, text: str, pos: tuple[int, int], size: int = 22,
               color=COLORS["text"]) -> int:
@@ -172,11 +197,22 @@ class HUD:
         self._line(surface, wave_status(world), (x, y), 19, COLORS["wave_warning"])
 
         enabled = turns.is_player_phase and not world.game_over
-        for b in self.buttons:
+        hero = ui.selected_unit if isinstance(ui.selected_unit, Hero) else None
+        if hero is not None:
+            self.active_buttons = self._hero_buttons(world, hero) + self.buttons[-2:]
+        else:
+            self.active_buttons = self.buttons
+        mine = hero is not None and world.can_control(hero, ui.player_id)
+        for b in self.active_buttons:
             on = enabled and (world.can_undo if b.action == "undo" else True)
+            active = ui.mode == b.action
+            if b.action.startswith("skill:") and hero is not None:
+                skill = world.hero_skills(hero)[int(b.action.split(":")[1])]
+                on = enabled and mine and world.skill_status(hero, skill.id)[0]
+                active = ui.skill == skill.id
             if b.action == "undo":
                 b.label = f"Desfazer ({len(world.history)})" if world.history else "Desfazer [Z]"
-            b.draw(surface, self, b.rect.collidepoint(mouse_pos), ui.mode == b.action, on,
+            b.draw(surface, self, b.rect.collidepoint(mouse_pos), active, on,
                    COLORS["end_turn"] if b.action == "end_turn" else None)
         self.menu_button.draw(surface, self, self.menu_button.rect.collidepoint(mouse_pos),
                               False, True)
@@ -184,13 +220,56 @@ class HUD:
         y = self._draw_info(surface, world, ui, x, self.info_top)
         self._draw_log(surface, world, x, y + 8)
 
+    def _hero_state(self, world: World, h: Hero) -> str:
+        if h.state == "downed":
+            return f"CAÍDO ({h.downed_turns}t p/ resgate)"
+        if h.state == "recovering":
+            return f"na base ({h.recover_turns}t)"
+        extra = f" Abatido {h.debuff_turns}t" if h.debuffed else ""
+        return f"HP {h.hp}/{h.max_hp}{extra}"
+
+    def _hero_lines(self, world: World, h: Hero) -> list[tuple[str, tuple[int, int, int]]]:
+        xp, nxt = world.xp_progress(h)
+        owner = f"P{h.owner}" if h.owner else "sem dono"
+        lines = [(f"{h.name} ({h.role}, {owner}) Nv {h.level} - XP {xp}"
+                  + (f"/{nxt}" if nxt is not None else " (máx.)"), h.color)]
+        stats = (f"HP {h.hp}/{h.max_hp} | Armadura {h.armor} | Mov {h.move_range}"
+                 f"{' (usado)' if h.moved else ''} | Alc {world.unit_range(h)} | Dano {h.damage}")
+        if h.max_mana:
+            stats += f" | Mana {h.mana}/{h.max_mana}"
+        lines.append((stats, COLORS["text_dim"]))
+        status = []
+        if h.downed:
+            status.append(f"Caído: um aliado adjacente o levanta ({HERO_REVIVE_AP} AP), "
+                          f"{h.downed_turns} turno(s) restantes")
+        if h.stealthed:
+            status.append(f"Furtivo {h.stealth_turns}t")
+        if h.guard_armor:
+            status.append(f"Defesa +{h.guard_armor}")
+        if h.debuffed:
+            status.append(f"Abatido {h.debuff_turns}t (-1 dano, -1 mov)")
+        if h.acted:
+            status.append("agiu")
+        if status:
+            lines.append((" | ".join(status), COLORS["skill"]))
+        return lines
+
     def _draw_info(self, surface, world: World, ui: UIState, x: int, y: int) -> int:
+        if world.heroes:
+            y = self._line(surface, "Heróis", (x, y), 22, COLORS["title"])
+            for h in world.heroes:
+                owner = f"P{h.owner}" if h.owner else "--"
+                y = self._line(surface, f"{owner} {h.name} Nv{h.level}  {self._hero_state(world, h)}",
+                               (x, y), 18, h.color)
+            y += 4
         y = self._line(surface, "Inspeção", (x, y), 22, COLORS["title"])
         pos: Optional[Pos] = ui.hover_tile or ui.selected_tile
         lines: list[tuple[str, tuple[int, int, int]]] = []
-        if ui.selected_unit is not None:
+        if isinstance(ui.selected_unit, Hero):
+            lines += self._hero_lines(world, ui.selected_unit)
+        elif ui.selected_unit is not None:
             u = ui.selected_unit
-            lines.append((f"Selecionado: {u.name} HP {u.hp}/{u.max_hp}", COLORS[u.color_key]))
+            lines.append((f"Selecionado: {u.name} HP {u.hp}/{u.max_hp}", unit_color(u)))
             shelter = world.shelter_of(u)
             if shelter is not None:
                 lines.append((f"Abrigado na {shelter.name}: protegido, +{shelter.range_bonus} alc., "
@@ -238,7 +317,10 @@ class HUD:
                                   f"Vazia: mova uma unidade para cá (+{b.range_bonus} alcance, "
                                   f"+{b.vision_bonus} visão, protegida)", COLORS["text_dim"]))
             if t.unit is not None and t.unit is not ui.selected_unit:
-                lines.append((f"{t.unit.name} HP {t.unit.hp}/{t.unit.max_hp}", COLORS[t.unit.color_key]))
+                if isinstance(t.unit, Hero):
+                    lines += self._hero_lines(world, t.unit)[:2]
+                else:
+                    lines.append((f"{t.unit.name} HP {t.unit.hp}/{t.unit.max_hp}", unit_color(t.unit)))
             if t.swarm is not None and seen:
                 s = t.swarm
                 state = "agressivo" if s.aggressive else "ocioso"
@@ -252,13 +334,26 @@ class HUD:
                               f"{f' | Alc {sp.attack_range}' if sp.attack_range > 1 else ''}",
                               COLORS["text_dim"]))
                 lines.append((sp.description, COLORS["text_dim"]))
+                if s.taunt_turns > 0 or s.rooted_turns > 0:
+                    fx = []
+                    if s.taunt_turns > 0 and s.taunt_hero:
+                        fx.append(f"provocado por {HERO_SPECS[s.taunt_hero].name}")
+                    if s.rooted_turns > 0:
+                        fx.append("preso por raízes")
+                    lines.append((", ".join(fx).capitalize(), COLORS["skill"]))
             level = world.noise_map.get(pos, 0)
             if level:
                 lines.append((f"Ruído no último turno: {level}", COLORS["noise"]))
-        if ui.mode:
+        if ui.skill:
+            lines.append(("Roxo: alvos da habilidade. Clique para usar; Esc cancela.", COLORS["skill"]))
+        elif ui.mode:
             lines.append(("Clique no mapa para aplicar. Botão direito/Esc cancela.", COLORS["text_dim"]))
+        elif isinstance(ui.selected_unit, Hero) and not world.can_control(ui.selected_unit, ui.player_id):
+            lines.append((f"Herói de P{ui.selected_unit.owner}: só o dono pode comandá-lo.",
+                          COLORS["text_dim"]))
         elif ui.selected_unit is not None:
-            lines.append(("Azul: mover | Vermelho: atacar | Amarelo: coletar", COLORS["text_dim"]))
+            lines.append(("Azul: mover | Vermelho: atacar | Amarelo: coletar | Verde: levantar caído",
+                          COLORS["text_dim"]))
         width = self.rect.w - 24
         for text, color in lines:
             for part in wrap_text(self.font(19), text, width):
@@ -278,6 +373,6 @@ class HUD:
         for line in wrapped[-max_lines:] if max_lines else []:
             surface.blit(font.render(line, True, COLORS["text_dim"]), (x, y))
             y += line_h
-        help_text = "WASD: câmera | Roda: zoom | M: música | -/+: volume | Esc: menu"
+        help_text = "WASD: câmera | H: herói | Q/E/R: habilidades | M: música | Esc: menu"
         surface.blit(self.font(17).render(help_text, True, COLORS["text_dim"]),
                      (x, self.rect.bottom - 22))

@@ -41,7 +41,8 @@ class StatsFilesTest(unittest.TestCase):
 class StatsParsingTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
-        for name in ("buildings.csv", "units.csv", "zombies.csv", "waves.csv", "crates.csv"):
+        for name in ("buildings.csv", "units.csv", "zombies.csv", "waves.csv", "crates.csv",
+                     "heroes.csv", "skills.csv"):
             shutil.copy(DATA_DIR / name, self.tmp / name)
 
     def tearDown(self):

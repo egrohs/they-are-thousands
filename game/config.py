@@ -86,6 +86,21 @@ FOG_MEMORY_MARGIN = 3
 
 UNDO_LIMIT = 30         # ações do jogador que podem ser desfeitas por turno
 
+# --- Heróis (stats em data/heroes.csv, habilidades em data/skills.csv) --------
+HERO_LEVEL_XP = (0, 5, 12, 22, 35)   # XP total para cada nível (1..5)
+HERO_XP_KILL = 1          # por zumbi abatido pelo herói
+HERO_XP_SKILL = 1         # por habilidade de suporte/controle usada com efeito
+HERO_XP_REVIVE = 3        # por levantar um herói caído
+HERO_XP_SURVIVE = 1       # por turno terminado de pé
+HERO_DOWNED_TURNS = 2     # turnos caído esperando resgate antes de ser capturado
+HERO_RECOVERY_TURNS = 3   # turnos de convalescença na base após a captura
+HERO_REVIVE_AP = 2
+HERO_REVIVE_HP = 0.3      # fração do HP máximo ao ser levantado
+HERO_REVIVE_HP_HEALER = 0.6
+HERO_RETURN_HP = 0.5      # fração do HP ao voltar da convalescença
+HERO_DEBUFF_TURNS = 3     # "Abatido": -1 dano e -1 movimento ao voltar
+HERO_XP_LOSS = 0.5        # fração do XP do nível atual perdida na captura
+
 # caixas de recursos (tipos em data/crates.csv): espalhadas fora da base nos mapas aleatórios
 CRATE_COUNT = 7
 CRATE_SPACING = 3       # distância Chebyshev mínima entre caixas
@@ -137,6 +152,12 @@ COLORS: dict[str, tuple[int, int, int]] = {
     "infected": (120, 180, 40),
     "soldier": (60, 140, 235),
     "ranger": (80, 205, 145),
+    "downed": (150, 150, 160),
+    "heal": (110, 255, 150),
+    "magic": (90, 200, 255),
+    "skill": (200, 140, 255),
+    "taunt": (255, 90, 60),
+    "levelup": (255, 220, 90),
     "zombie_idle": (105, 36, 36),
     "zombie_aggr": (200, 40, 32),
     "zombie_noise": (255, 150, 40),

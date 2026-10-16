@@ -16,13 +16,17 @@ from .config import (AGGRO_DISTANCE, AP_PER_TURN, ATTACK_AP,
                      NOISE_MEMORY_TURNS, REPAIR_AMOUNT, REPAIR_AP, REPAIR_NOISE, REPAIR_WOOD,
                      RESOURCE_LABELS, START_RESOURCES, START_SWARM_TYPES, WALL_BASH_COST,
                      WANDER_CHANCE, WAVE_EDGE_DEPTH, WAVE_EDGE_SPREAD, CRATE_COUNT, CRATE_SPACING,
-                     UNDO_LIMIT)
-from .entities import (BUILDING_TYPES, Building, CommandCenter, Entity, InfectedHouse,
+                     UNDO_LIMIT, HERO_DEBUFF_TURNS, HERO_DOWNED_TURNS, HERO_LEVEL_XP,
+                     HERO_RECOVERY_TURNS, HERO_RETURN_HP, HERO_REVIVE_AP, HERO_REVIVE_HP,
+                     HERO_REVIVE_HP_HEALER, HERO_XP_KILL, HERO_XP_LOSS, HERO_XP_REVIVE,
+                     HERO_XP_SKILL, HERO_XP_SURVIVE)
+from .entities import (BUILDING_TYPES, Building, CommandCenter, Entity, Hero, InfectedHouse,
                        Ranger, Soldier, Tent, Unit, ZombieSwarm)
 from .fog import FogOfWar
 from .grid import INF, Grid, Pos, Terrain
-from .stats import (BUILD_SPECS, BUILDING_STATS, CRATE_SPECS, DIRECTION_NAMES, WAVE_SCHEDULE,
-                    ZOMBIE_SPECS, WaveRow, direction_token)
+from .stats import (BUILD_SPECS, BUILDING_STATS, CRATE_SPECS, DIRECTION_NAMES, HERO_SKILLS,
+                    HERO_SPECS, SKILL_SPECS, WAVE_SCHEDULE, ZOMBIE_SPECS, SkillStats, WaveRow,
+                    direction_token)
 
 MAX_LOG = 80
 
@@ -135,6 +139,7 @@ class World:
         self.crates_found = 0
         self.history: list[dict] = []   # snapshots para desfazer (só no turno atual)
         self._revealed = False
+        self.heroes: list[Hero] = []    # um por jogador (no mapa, caídos ou convalescendo)
         if map_data is None:
             self._generate_map()
             self._place_crates()
@@ -575,6 +580,7 @@ class World:
             swarm = tile.swarm
             killed = swarm.kill(unit.damage)
             self.zombies_killed += killed
+            self._credit_kills(unit, killed)
             if killed:
                 self.message(f"{unit.name} abateu {killed} {swarm.name}(s) em {pos}.")
             else:
@@ -590,6 +596,9 @@ class World:
                 self.message(f"{house.name} em {pos} destruída!")
         self.effects.append(Effect(unit.pos, pos, "shot"))
         self.emit_noise(unit.pos, unit.noise, unit.name)
+        if isinstance(unit, Hero) and unit.stealth_turns > 0:
+            unit.stealth_turns = 0
+            self.message(f"{unit.name} atacou e saiu da furtividade.")
         return True
 
     def gather_targets(self, unit: Unit) -> list[Pos]:
@@ -619,6 +628,457 @@ class World:
         return True
 
     # ======================================================================
+    # Heróis: escolha, XP, habilidades, queda/resgate/captura
+    # ======================================================================
+    def hero(self, hero_id: str) -> Optional[Hero]:
+        return next((h for h in self.heroes if h.hero_id == hero_id), None)
+
+    def hero_of(self, owner: int) -> Optional[Hero]:
+        return next((h for h in self.heroes if h.owner == owner), None)
+
+    @staticmethod
+    def can_control(unit: Optional[Unit], player: Optional[int]) -> bool:
+        """Heróis só obedecem ao dono (0 = sem dono); unidades comuns são compartilhadas."""
+        return (unit is not None and (player is None or not isinstance(unit, Hero)
+                                      or unit.owner in (0, player)))
+
+    def _hero_spot(self) -> Optional[Pos]:
+        """Tile livre mais próximo do Centro de Comando (entrada/retorno de heróis)."""
+        hq = self.hq.pos
+        options = [t.pos for t in self.grid if self.grid.is_free(t.pos) and not t.crate]
+        if not options:
+            return None
+        return min(options, key=lambda p: (Grid.chebyshev(p, hq), Grid.manhattan(p, hq), p[1], p[0]))
+
+    def can_pick_hero(self, hero_id: str, owner: int) -> tuple[bool, str]:
+        if self.game_over:
+            return False, "Jogo encerrado."
+        spec = HERO_SPECS.get(hero_id)
+        if spec is None:
+            return False, "Herói desconhecido."
+        mine = self.hero_of(owner)
+        if mine is not None:
+            return False, f"P{owner} já controla {mine.name}."
+        taken = self.hero(hero_id)
+        if taken is not None and taken.owner != 0:
+            return False, f"{spec.name} já pertence a P{taken.owner}."
+        if taken is None and self._hero_spot() is None:
+            return False, "Sem espaço livre perto do Centro de Comando."
+        return True, ""
+
+    def pick_hero(self, hero_id: str, owner: int) -> bool:
+        """Escolhe (ou assume, se estiver sem dono) o herói de um jogador.
+        Não pode ser desfeito: limpa o histórico de desfazer."""
+        ok, reason = self.can_pick_hero(hero_id, owner)
+        if not ok:
+            self.message(reason)
+            return False
+        hero = self.hero(hero_id)
+        if hero is not None:
+            hero.owner = owner
+            self.message(f"P{owner} assumiu {hero.name} ({hero.role}).")
+        else:
+            pos = self._hero_spot()
+            assert pos is not None
+            hero = Hero(pos, hero_id, owner)
+            self.heroes.append(hero)
+            self.grid.place_unit(hero)
+            self.update_fog()
+            self.message(f"P{owner} escolheu {hero.name} ({hero.role}).")
+        self.history.clear()
+        return True
+
+    def release_heroes(self, owner: int) -> int:
+        """O jogador saiu: seus heróis ficam sem dono (qualquer um pode controlar/assumir)."""
+        released = 0
+        for h in self.heroes:
+            if h.owner == owner:
+                h.owner = 0
+                released += 1
+                self.message(f"{h.name} ficou sem dono: qualquer jogador pode comandá-lo(a).")
+        return released
+
+    # --- XP -----------------------------------------------------------------
+    @staticmethod
+    def level_for(xp: int) -> int:
+        return sum(1 for need in HERO_LEVEL_XP if xp >= need)
+
+    @staticmethod
+    def xp_progress(hero: Hero) -> tuple[int, Optional[int]]:
+        """(XP atual, XP do próximo nível ou None no nível máximo)."""
+        nxt = HERO_LEVEL_XP[hero.level] if hero.level < len(HERO_LEVEL_XP) else None
+        return hero.xp, nxt
+
+    def gain_xp(self, unit: Optional[Unit], amount: int) -> None:
+        if not isinstance(unit, Hero) or amount <= 0:
+            return
+        unit.xp += amount
+        target = self.level_for(unit.xp)
+        while unit.level < target:
+            unit.level += 1
+            spec = unit.spec
+            unit.max_hp += spec.hp_per_level
+            if unit.alive:
+                unit.hp += spec.hp_per_level
+            unit.mana = min(unit.max_mana, unit.mana + spec.mana_per_level)
+            self.effects.append(Effect(unit.pos, unit.pos, "levelup"))
+            self.message(f"{unit.name} subiu para o nível {unit.level}!")
+
+    def _credit_kills(self, unit: Optional[Unit], killed: int) -> None:
+        if isinstance(unit, Hero) and killed > 0:
+            unit.kills += killed
+            self.gain_xp(unit, killed * HERO_XP_KILL)
+
+    # --- habilidades ---------------------------------------------------------
+    @staticmethod
+    def hero_skills(hero: Hero) -> list[SkillStats]:
+        return HERO_SKILLS.get(hero.hero_id, [])
+
+    @staticmethod
+    def skill_power(hero: Hero, skill: SkillStats) -> int:
+        return skill.power + skill.per_level * (hero.level - 1)
+
+    def skill_status(self, hero: Hero, skill_id: str) -> tuple[bool, str]:
+        skill = SKILL_SPECS.get(skill_id)
+        if skill is None or skill.hero != hero.hero_id:
+            return False, "Habilidade indisponível para este herói."
+        if self.game_over:
+            return False, "Jogo encerrado."
+        if hero.state != "active" or not hero.alive:
+            return False, f"{hero.name} está fora de combate."
+        if skill.target == "move":
+            if hero.moved:
+                return False, f"{hero.name} já se moveu neste turno."
+        elif hero.acted:
+            return False, f"{hero.name} já agiu neste turno."
+        if hero.cooldown(skill_id) > 0:
+            return False, f"{skill.name} recarregando ({hero.cooldown(skill_id)} turno(s))."
+        if hero.mana < skill.mana:
+            return False, f"Mana insuficiente ({skill.mana} necessária)."
+        if self.ap < skill.ap:
+            return False, f"AP insuficiente ({skill.ap} necessário)."
+        return True, ""
+
+    def _line(self, start: Pos, step: Pos, length: int) -> list[Pos]:
+        """Tiles em linha reta; Florestas e Pedreiras bloqueiam o disparo (água não)."""
+        out: list[Pos] = []
+        x, y = start
+        for _ in range(length):
+            x, y = x + step[0], y + step[1]
+            if not self.grid.in_bounds((x, y)):
+                break
+            terrain = self.grid.tile((x, y)).terrain
+            if not terrain.passable and terrain is not Terrain.WATER:
+                break
+            out.append((x, y))
+        return out
+
+    def skill_targets(self, hero: Hero, skill_id: str) -> list[Pos]:
+        if not self.skill_status(hero, skill_id)[0]:
+            return []
+        skill = SKILL_SPECS[skill_id]
+        kind = skill.target
+        if kind == "self":
+            return [hero.pos]
+        if kind == "line":
+            return [p for d in ((0, -1), (0, 1), (-1, 0), (1, 0))
+                    for p in self._line(hero.pos, d, skill.range)]
+        cells = [p for p in self.grid.tiles_in_radius(hero.pos, skill.range, "chebyshev")]
+        out: list[Pos] = []
+        for p in cells:
+            tile = self.grid.tile(p)
+            visible = self.fog.is_visible(p)
+            if kind == "enemy":
+                if p != hero.pos and visible and (
+                        tile.swarm is not None
+                        or (skill_id != "shove" and tile.building is not None and tile.building.hostile)):
+                    out.append(p)
+            elif kind == "ally":
+                u = tile.unit
+                if u is not None and u.alive and u.hp < u.max_hp:
+                    out.append(p)
+            elif kind == "tile":
+                if visible or (skill_id == "lure" and self.fog.is_known(p)):
+                    out.append(p)
+            elif kind == "move":
+                if (p != hero.pos and visible and tile.terrain.passable and tile.building is None
+                        and tile.unit is None and tile.swarm is None):
+                    out.append(p)
+        return out
+
+    @undoable
+    def use_skill(self, hero: Hero, skill_id: str, target: Pos) -> bool:
+        ok, reason = self.skill_status(hero, skill_id)
+        if not ok:
+            self.message(reason)
+            return False
+        skill = SKILL_SPECS[skill_id]
+        if target not in self.skill_targets(hero, skill_id):
+            self.message(f"Alvo inválido para {skill.name}.")
+            return False
+        self.ap -= skill.ap
+        hero.mana -= skill.mana
+        if skill.cooldown > 0:
+            hero.cooldowns[skill_id] = skill.cooldown
+        if skill.target == "move":
+            hero.moved = True
+        else:
+            hero.acted = True
+        getattr(self, f"_skill_{skill_id}")(hero, skill, self.skill_power(hero, skill), target)
+        self.emit_noise(hero.pos, skill.noise, f"{hero.name}: {skill.name}")
+        return True
+
+    def _hit(self, hero: Hero, pos: Pos, damage: int) -> int:
+        """Dano de habilidade em um tile (enxame ou casa infectada). Retorna zumbis abatidos."""
+        tile = self.grid.tile(pos)
+        swarm = tile.swarm
+        if swarm is not None:
+            killed = swarm.kill(damage)
+            self.zombies_killed += killed
+            self._credit_kills(hero, killed)
+            if not swarm.alive:
+                self.grid.remove_swarm(swarm)
+            return killed
+        b = tile.building
+        if b is not None and b.hostile:
+            b.take_damage(damage)
+            if not b.alive:
+                self.grid.remove_building(b)
+                self.message(f"{b.name} em {pos} destruída!")
+        return 0
+
+    def _skill_taunt(self, hero: Hero, skill: SkillStats, power: int, target: Pos) -> None:
+        swarms = [s for s in self.grid.swarms()
+                  if Grid.chebyshev(s.pos, hero.pos) <= skill.radius]
+        for s in swarms:
+            s.taunt_hero = hero.hero_id
+            s.taunt_turns = max(s.taunt_turns, skill.duration)
+            s.aggressive = True
+        seen = sum(1 for s in swarms if self.fog.is_visible(s.pos))
+        self.effects.append(Effect(hero.pos, hero.pos, "taunt"))
+        self.message(f"{hero.name} usou {skill.name}: {seen} enxame(s) à vista vêm atrás dele(a).")
+        if swarms:
+            self.gain_xp(hero, HERO_XP_SKILL)
+
+    def _skill_guard(self, hero: Hero, skill: SkillStats, power: int, target: Pos) -> None:
+        hero.guard_armor = power
+        hero.guard_turns = max(1, skill.duration)
+        self.effects.append(Effect(hero.pos, hero.pos, "skill"))
+        self.message(f"{hero.name} assumiu {skill.name} (+{power} armadura).")
+
+    def _skill_pierce(self, hero: Hero, skill: SkillStats, power: int, target: Pos) -> None:
+        step = ((target[0] > hero.pos[0]) - (target[0] < hero.pos[0]),
+                (target[1] > hero.pos[1]) - (target[1] < hero.pos[1]))
+        line = self._line(hero.pos, step, skill.range)
+        killed = hit = 0
+        for p in line:
+            if self.grid.tile(p).swarm is not None and self.fog.is_visible(p):
+                killed += self._hit(hero, p, power)
+                hit += 1
+        if line:
+            self.effects.append(Effect(hero.pos, line[-1], "shot"))
+        self.message(f"{hero.name}: {skill.name} atingiu {hit} enxame(s) e abateu {killed} zumbi(s).")
+
+    def _skill_snipe(self, hero: Hero, skill: SkillStats, power: int, target: Pos) -> None:
+        name = (self.grid.tile(target).swarm or self.grid.tile(target).building).name
+        killed = self._hit(hero, target, power)
+        self.effects.append(Effect(hero.pos, target, "shot"))
+        self.message(f"{hero.name}: {skill.name} em {name} ({killed} abatido(s)).")
+
+    def _skill_stealth(self, hero: Hero, skill: SkillStats, power: int, target: Pos) -> None:
+        hero.stealth_turns = skill.duration
+        self.effects.append(Effect(hero.pos, hero.pos, "skill"))
+        self.message(f"{hero.name} sumiu nas sombras por {skill.duration} turno(s).")
+
+    def _skill_shove(self, hero: Hero, skill: SkillStats, power: int, target: Pos) -> None:
+        swarm = self.grid.tile(target).swarm
+        assert swarm is not None
+        step = ((target[0] > hero.pos[0]) - (target[0] < hero.pos[0]),
+                (target[1] > hero.pos[1]) - (target[1] < hero.pos[1]))
+        moved, bumped = 0, False
+        for _ in range(power):
+            nxt = (swarm.pos[0] + step[0], swarm.pos[1] + step[1])
+            if not self.grid.is_free(nxt):
+                bumped = True
+                break
+            self.grid.move_swarm(swarm, nxt)
+            moved += 1
+        text = f"{hero.name} empurrou {swarm.name} {moved} tile(s)"
+        if bumped:
+            killed = swarm.kill(1)
+            self.zombies_killed += killed
+            self._credit_kills(hero, killed)
+            text += " contra um obstáculo (1 de dano)"
+            if not swarm.alive:
+                self.grid.remove_swarm(swarm)
+        self.effects.append(Effect(hero.pos, swarm.pos, "skill"))
+        self.message(text + ".")
+        if hero.stealth_turns > 0:
+            hero.stealth_turns = 0
+            self.message(f"{hero.name} saiu da furtividade.")
+        self.gain_xp(hero, HERO_XP_SKILL)
+
+    def _skill_lure(self, hero: Hero, skill: SkillStats, power: int, target: Pos) -> None:
+        self.emit_noise(target, power, skill.name)
+        self.effects.append(Effect(hero.pos, target, "skill"))
+        self.message(f"{hero.name} lançou uma {skill.name} em {target} (raio {power}).")
+
+    def _skill_heal(self, hero: Hero, skill: SkillStats, power: int, target: Pos) -> None:
+        unit = self.grid.tile(target).unit
+        assert unit is not None
+        healed = unit.heal(power)
+        self.effects.append(Effect(hero.pos, target, "heal"))
+        self.message(f"{hero.name} curou {unit.name} (+{healed} HP).")
+        self.gain_xp(hero, HERO_XP_SKILL)
+
+    def _skill_heal_aoe(self, hero: Hero, skill: SkillStats, power: int, target: Pos) -> None:
+        total = count = 0
+        for u in sorted(self.grid.units(), key=lambda u: u.pos):
+            if u.alive and Grid.chebyshev(u.pos, hero.pos) <= skill.radius:
+                healed = u.heal(power)
+                if healed:
+                    total += healed
+                    count += 1
+                    self.effects.append(Effect(u.pos, u.pos, "heal"))
+        self.message(f"{hero.name}: {skill.name} curou {count} aliado(s) (+{total} HP).")
+        if total:
+            self.gain_xp(hero, HERO_XP_SKILL)
+
+    def _area(self, center: Pos, radius: int) -> list[Pos]:
+        return [p for p in self.grid.tiles_in_radius(center, radius, "chebyshev")
+                if self.fog.is_visible(p)]
+
+    def _skill_fireball(self, hero: Hero, skill: SkillStats, power: int, target: Pos) -> None:
+        killed = 0
+        for p in self._area(target, skill.radius):
+            t = self.grid.tile(p)
+            if t.swarm is not None or (t.building is not None and t.building.hostile):
+                killed += self._hit(hero, p, power)
+        self.effects.append(Effect(hero.pos, target, "magic"))
+        self.message(f"{hero.name}: {skill.name} em {target} abateu {killed} zumbi(s).")
+
+    def _skill_root(self, hero: Hero, skill: SkillStats, power: int, target: Pos) -> None:
+        rooted = 0
+        for p in self._area(target, skill.radius):
+            s = self.grid.tile(p).swarm
+            if s is not None:
+                s.rooted_turns = max(s.rooted_turns, skill.duration)
+                rooted += 1
+        self.effects.append(Effect(hero.pos, target, "magic"))
+        self.message(f"{hero.name}: {skill.name} prendeu {rooted} enxame(s).")
+        if rooted:
+            self.gain_xp(hero, HERO_XP_SKILL)
+
+    def _skill_blink(self, hero: Hero, skill: SkillStats, power: int, target: Pos) -> None:
+        start = hero.pos
+        self.grid.move_unit(hero, target)
+        self.update_fog()
+        self.effects.append(Effect(start, target, "magic"))
+        self.message(f"{hero.name} se teleportou para {target}.")
+        self.collect_crate(target, hero.name)
+
+    # --- queda, resgate e captura ----------------------------------------------
+    def _down_hero(self, hero: Hero) -> None:
+        hero.hp = 0
+        hero.state = "downed"
+        hero.downed_turns = HERO_DOWNED_TURNS
+        hero.downed_fresh = True
+        hero.stealth_turns = hero.guard_turns = hero.guard_armor = 0
+        self.message(f"{hero.name} caiu! Um aliado adjacente pode levantá-lo(a) "
+                     f"({HERO_REVIVE_AP} AP) em até {HERO_DOWNED_TURNS} turno(s).")
+
+    def revive_targets(self, unit: Unit) -> list[Pos]:
+        if self.game_over or not unit.alive or unit.acted or self.ap < HERO_REVIVE_AP:
+            return []
+        return [h.pos for h in self.heroes
+                if h.state == "downed" and h is not unit and Grid.chebyshev(h.pos, unit.pos) <= 1]
+
+    @undoable
+    def revive_hero(self, unit: Unit, pos: Pos) -> bool:
+        if pos not in self.revive_targets(unit):
+            self.message(f"{unit.name} não pode levantar ninguém em {pos}.")
+            return False
+        hero = self.grid.tile(pos).unit
+        assert isinstance(hero, Hero)
+        healer = isinstance(unit, Hero) and unit.hero_id == "healer"
+        frac = HERO_REVIVE_HP_HEALER if healer else HERO_REVIVE_HP
+        hero.hp = max(1, round(hero.max_hp * frac))
+        hero.state = "active"
+        hero.downed_turns = 0
+        hero.downed_fresh = False
+        hero.moved = hero.acted = True   # acabou de levantar: age no próximo turno
+        self.ap -= HERO_REVIVE_AP
+        unit.acted = True
+        self.effects.append(Effect(unit.pos, pos, "heal"))
+        self.message(f"{unit.name} levantou {hero.name} ({hero.hp}/{hero.max_hp} HP).")
+        self.gain_xp(unit, HERO_XP_REVIVE)
+        return True
+
+    def _capture_hero(self, hero: Hero) -> None:
+        self.grid.remove_unit(hero)
+        hero.state = "recovering"
+        hero.recover_turns = HERO_RECOVERY_TURNS
+        floor = HERO_LEVEL_XP[hero.level - 1]
+        lost = int((hero.xp - floor) * HERO_XP_LOSS)
+        hero.xp -= lost
+        self.message(f"{hero.name} não foi resgatado(a) e foi levado(a) inconsciente à base: "
+                     f"volta em {HERO_RECOVERY_TURNS} turnos (-{lost} XP).")
+
+    def _return_hero(self, hero: Hero) -> None:
+        pos = self._hero_spot()
+        if pos is None:
+            hero.recover_turns = 0
+            self.message(f"{hero.name} aguarda espaço livre perto do Centro de Comando.")
+            return
+        hero.pos = pos
+        hero.state = "active"
+        hero.hp = max(1, round(hero.max_hp * HERO_RETURN_HP))
+        hero.debuff_turns = HERO_DEBUFF_TURNS
+        hero.reset_turn()
+        self.grid.place_unit(hero)
+        self.message(f"{hero.name} voltou da convalescença, Abatido(a) por {HERO_DEBUFF_TURNS} "
+                     f"turnos (-1 dano, -1 movimento).")
+
+    def _tick_heroes(self) -> None:
+        for s in self.grid.swarms():
+            if s.taunt_turns > 0:
+                s.taunt_turns -= 1
+                if s.taunt_turns == 0:
+                    s.taunt_hero = None
+            if s.rooted_turns > 0:
+                s.rooted_turns -= 1
+        for h in self.heroes:
+            if h.state == "recovering":
+                h.recover_turns = max(0, h.recover_turns - 1)
+                if h.recover_turns == 0:
+                    self._return_hero(h)
+            elif h.state == "downed":
+                if h.downed_fresh:
+                    h.downed_fresh = False
+                else:
+                    h.downed_turns -= 1
+                if h.downed_turns <= 0:
+                    self._capture_hero(h)
+                else:
+                    self.message(f"{h.name} está caído(a): {h.downed_turns} turno(s) para o resgate.")
+            else:
+                h.debuff_turns = max(0, h.debuff_turns - 1)
+                h.stealth_turns = max(0, h.stealth_turns - 1)
+                if h.guard_turns > 0:
+                    h.guard_turns -= 1
+                    if h.guard_turns == 0:
+                        h.guard_armor = 0
+                self.gain_xp(h, HERO_XP_SURVIVE)
+
+    def _taunter(self, swarm: ZombieSwarm) -> Optional[Hero]:
+        if swarm.taunt_turns <= 0 or swarm.taunt_hero is None:
+            return None
+        h = self.hero(swarm.taunt_hero)
+        if h is None or h.state != "active" or not h.alive or h.stealthed:
+            return None
+        return h
+
+    # ======================================================================
     # Fases automáticas
     # ======================================================================
     def begin_player_phase(self) -> None:
@@ -626,6 +1086,11 @@ class World:
         self.ap = AP_PER_TURN
         for u in self.grid.units():
             u.reset_turn()
+        for h in self.heroes:
+            for k in list(h.cooldowns):
+                h.cooldowns[k] = max(0, h.cooldowns[k] - 1)
+            if h.state == "active":
+                h.mana = min(h.max_mana, h.mana + h.spec.mana_regen)
         self.update_fog()
 
     def propagate_noise(self) -> None:
@@ -676,11 +1141,19 @@ class World:
 
     def civil_field(self, flying: bool = False) -> dict[Pos, float]:
         goals = [b.pos for b in self.grid.buildings() if b.civil and b.alive]
-        goals += [u.pos for u in self.grid.units() if u.alive]
+        goals += [u.pos for u in self.grid.units()
+                  if u.alive and not (isinstance(u, Hero) and u.stealthed)]
         cost = self._flying_enter_cost if flying else self._zombie_enter_cost
         return self.grid.dijkstra(goals, cost)
 
     def _field_for(self, swarm: ZombieSwarm, cache: dict[tuple, dict[Pos, float]]) -> dict[Pos, float]:
+        cost = self._flying_enter_cost if swarm.flying else self._zombie_enter_cost
+        taunter = self._taunter(swarm)
+        if taunter is not None:  # provocado: persegue o herói, ignorando barulho e civis
+            key = ("taunt", taunter.pos, swarm.flying)
+            if key not in cache:
+                cache[key] = self.grid.dijkstra([taunter.pos], cost)
+            return cache[key]
         target = swarm.noise_target
         if target is not None and Grid.manhattan(swarm.pos, target) <= 1:
             swarm.noise_target = None
@@ -691,7 +1164,6 @@ class World:
             if target is None:
                 cache[key] = self.civil_field(swarm.flying)
             else:
-                cost = self._flying_enter_cost if swarm.flying else self._zombie_enter_cost
                 cache[key] = self.grid.dijkstra([target], cost)
         return cache[key]
 
@@ -708,7 +1180,8 @@ class World:
             if t.building is not None and t.building.garrison and t.building.alive:
                 targets.append(t.building)  # unidade abrigada fica protegida pela torre
             elif t.unit is not None and t.unit.alive:
-                targets.append(t.unit)
+                if not (isinstance(t.unit, Hero) and t.unit.stealthed):
+                    targets.append(t.unit)
             elif t.building is not None and not t.building.hostile and t.building.alive:
                 targets.append(t.building)
         return targets
@@ -721,9 +1194,14 @@ class World:
 
     def _step_swarm(self, swarm: ZombieSwarm, field: dict[Pos, float]) -> bool:
         """Move um passo seguindo o campo. Retorna True se ainda pode continuar andando."""
-        if swarm.attack_range > 1 and swarm.noise_target is None:
+        taunter = self._taunter(swarm)
+        if swarm.attack_range > 1 and (swarm.noise_target is None or taunter is not None):
             in_range = self._swarm_targets(swarm)
-            if in_range:
+            if taunter is not None:
+                if taunter in in_range:
+                    swarm.intent = taunter.pos
+                    return False
+            elif in_range:
                 swarm.intent = min(in_range, key=self._attack_priority).pos
                 return False
         current = field.get(swarm.pos, INF)
@@ -769,6 +1247,8 @@ class World:
         swarms = self.grid.swarms()
         for s in swarms:
             s.intent = None
+            if self._taunter(s) is not None:
+                s.aggressive = True
             if not s.aggressive:
                 key = (None, s.flying)
                 if key not in cache:
@@ -778,6 +1258,8 @@ class World:
         swarms.sort(key=lambda s: (self._field_for(s, cache).get(s.pos, INF), s.pos))
         for s in swarms:
             if s.count <= 0 or self.grid.tile(s.pos).swarm is not s:
+                continue
+            if s.rooted_turns > 0:
                 continue
             if not s.aggressive:
                 self._wander(s)
@@ -824,6 +1306,7 @@ class World:
             killed = target.kill(unit.damage)
             unit.acted = True
             self.zombies_killed += killed
+            self._credit_kills(unit, killed)
             self.effects.append(Effect(tower.pos, target.pos, "shot"))
             self.emit_noise(tower.pos, unit.noise, unit.name)
             self.message(f"{unit.name} na {tower.name} abateu {killed} {target.name}(s).")
@@ -846,7 +1329,9 @@ class World:
             targets = self._swarm_targets(s)
             if not targets:
                 continue
-            target = next((e for e in targets if e.pos == s.intent), None)
+            target = self._taunter(s)
+            if target not in targets:
+                target = next((e for e in targets if e.pos == s.intent), None)
             if target is None:
                 target = min(targets, key=self._attack_priority)
             dealt = target.take_damage(s.damage_against(isinstance(target, Building)))
@@ -859,7 +1344,9 @@ class World:
                 self._on_destroyed(target, s)
 
     def _on_destroyed(self, target: Entity, attacker: ZombieSwarm) -> None:
-        if isinstance(target, Unit):
+        if isinstance(target, Hero):
+            self._down_hero(target)
+        elif isinstance(target, Unit):
             self.grid.remove_unit(target)
             if attacker.space > 0 and Grid.manhattan(attacker.pos, target.pos) <= 1:
                 attacker.count += 1
@@ -1006,6 +1493,7 @@ class World:
                 s.noise_turns -= 1
                 if s.noise_turns == 0:
                     s.noise_target = None
+        self._tick_heroes()
         arrived = False
         for wave in self.waves:
             if wave.turn == self.turn and not wave.spawned:
