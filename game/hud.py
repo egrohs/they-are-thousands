@@ -93,8 +93,10 @@ class HUD:
             Button(pygame.Rect(x, y + 50, half, 44), f"[3] {_name('ballista')}", "ballista", _cost_text("ballista")),
             Button(pygame.Rect(x + half + 8, y + 50, half, 44), "[4] Reparar", "repair",
                    f"{REPAIR_AP} AP | {REPAIR_WOOD} Ma | +{REPAIR_AMOUNT} HP"),
-            Button(pygame.Rect(x, y + 100, w, 44), f"[5] {_name('tesla')} (expande território)", "tesla",
-                   _cost_text("tesla") + f" | raio {BUILDING_STATS['tesla'].build_radius}"),
+            Button(pygame.Rect(x, y + 100, half, 44), f"[5] {_name('tesla')} (território)", "tesla",
+                   _cost_text("tesla") + f" | r{BUILDING_STATS['tesla'].build_radius}"),
+            Button(pygame.Rect(x + half + 8, y + 100, half, 44), f"[6] {_name('watchtower')}",
+                   "watchtower", _cost_text("watchtower")),
             Button(pygame.Rect(x, y + 152, w, 38), "Encerrar Turno  [Espaço]", "end_turn"),
         ]
         self.info_top = y + 202
@@ -167,7 +169,11 @@ class HUD:
         if ui.selected_unit is not None:
             u = ui.selected_unit
             lines.append((f"Selecionado: {u.name} HP {u.hp}/{u.max_hp}", COLORS[u.color_key]))
-            lines.append((f"Mov {u.move_range}{' (usado)' if u.moved else ''} | Alc {u.attack_range}"
+            shelter = world.shelter_of(u)
+            if shelter is not None:
+                lines.append((f"Abrigado na {shelter.name}: protegido, +{shelter.range_bonus} alc., "
+                               f"+{shelter.vision_bonus} visão", COLORS["watchtower"]))
+            lines.append((f"Mov {u.move_range}{' (usado)' if u.moved else ''} | Alc {world.unit_range(u)}"
                           f" | Dano {u.damage} | Ruído {u.noise}"
                           f"{' | agiu' if u.acted else ''}", COLORS["text_dim"]))
         if pos is not None and not world.fog.is_explored(pos):
@@ -184,6 +190,11 @@ class HUD:
             if t.building is not None:
                 b = t.building
                 lines.append((f"{b.name} HP {b.hp}/{b.max_hp}", COLORS[b.color_key]))
+                if b.garrison:
+                    guest = world.garrisoned(b)
+                    lines.append((f"Abriga: {guest.name}" if guest else
+                                  f"Vazia: mova uma unidade para cá (+{b.range_bonus} alcance, "
+                                  f"+{b.vision_bonus} visão, protegida)", COLORS["text_dim"]))
             if t.unit is not None and t.unit is not ui.selected_unit:
                 lines.append((f"{t.unit.name} HP {t.unit.hp}/{t.unit.max_hp}", COLORS[t.unit.color_key]))
             if t.swarm is not None and seen:

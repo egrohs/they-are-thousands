@@ -190,7 +190,10 @@ class Renderer:
             if t.building is not None:
                 self._draw_building(surface, rect, t.building, ts)
             if t.unit is not None:
-                self._draw_unit(surface, rect, t.unit, ts, t.unit is ui.selected_unit)
+                urect = rect
+                if t.building is not None:  # unidade abrigada: menor, no alto da torre
+                    urect = rect.inflate(-int(rect.w * 0.4), -int(rect.h * 0.4)).move(0, -int(rect.h * 0.14))
+                self._draw_unit(surface, urect, t.unit, urect.w, t.unit is ui.selected_unit)
             if t.swarm is not None and fog.is_visible(t.pos):
                 self._draw_swarm(surface, rect, t.swarm, ts)
 
@@ -257,7 +260,7 @@ class Renderer:
 
         if ui.selected_unit is not None and ui.selected_unit.alive:
             u = ui.selected_unit
-            r = u.attack_range
+            r = world.unit_range(u)
             tl = cam.tile_rect((u.pos[0] - r, u.pos[1] - r)).topleft
             br = cam.tile_rect((u.pos[0] + r, u.pos[1] + r)).bottomright
             pygame.draw.rect(surface, COLORS["attack"], pygame.Rect(tl, (br[0] - tl[0], br[1] - tl[1])), 1)
@@ -296,6 +299,10 @@ class Renderer:
             self._hp_bar(surface, rect, b.hp, b.max_hp)
             return
         inner = rect.inflate(-max(2, int(ts * 0.1)), -max(2, int(ts * 0.1)))
+        if b.garrison:
+            self._draw_tower(surface, inner, b, ts)
+            self._hp_bar(surface, rect, b.hp, b.max_hp)
+            return
         pygame.draw.rect(surface, COLORS[b.color_key], inner, border_radius=max(1, int(ts * 0.08)))
         pygame.draw.rect(surface, (0, 0, 0), inner, 2, border_radius=max(1, int(ts * 0.08)))
         if b.hostile:
@@ -303,6 +310,27 @@ class Renderer:
             pygame.draw.line(surface, (40, 70, 10), inner.topright, inner.bottomleft, 2)
         self._text(surface, b.symbol, (inner.centerx, inner.centery - int(ts * 0.06)), ts * 0.5)
         self._hp_bar(surface, rect, b.hp, b.max_hp)
+
+    def _draw_tower(self, surface, inner: pygame.Rect, b: Building, ts) -> None:
+        """Torre de Vigia: pernas de madeira + plataforma com ameias."""
+        color = COLORS[b.color_key]
+        dark = tuple(c // 2 for c in color)
+        leg = max(2, int(ts * 0.08))
+        top = inner.top + int(inner.h * 0.38)
+        for x in (inner.left + int(inner.w * 0.18), inner.right - int(inner.w * 0.18) - leg):
+            pygame.draw.rect(surface, dark, (x, top, leg, inner.bottom - top))
+        pygame.draw.line(surface, dark, (inner.left + int(inner.w * 0.2), top),
+                         (inner.right - int(inner.w * 0.2), inner.bottom - 1), max(1, leg // 2))
+        pygame.draw.line(surface, dark, (inner.right - int(inner.w * 0.2), top),
+                         (inner.left + int(inner.w * 0.2), inner.bottom - 1), max(1, leg // 2))
+        deck = pygame.Rect(inner.left, inner.top + int(inner.h * 0.18), inner.w, int(inner.h * 0.24))
+        pygame.draw.rect(surface, color, deck)
+        merlon = max(2, inner.w // 5)
+        for i in range(3):
+            mx = inner.left + i * (inner.w - merlon) // 2
+            pygame.draw.rect(surface, color, (mx, inner.top + int(inner.h * 0.04), merlon,
+                                              int(inner.h * 0.16)))
+        pygame.draw.rect(surface, (0, 0, 0), deck, 1)
 
     def _draw_unit(self, surface, rect: pygame.Rect, u: Unit, ts, selected: bool) -> None:
         dest = self._sprite(surface, u.kind, rect, EXHAUSTED_TINT if u.exhausted else None)

@@ -18,7 +18,7 @@ python -m unittest discover -s tests -t .
 | Entrada | Ação |
 |---|---|
 | Clique em unidade | Seleciona (azul = mover, vermelho = atacar, amarelo = coletar) |
-| `1` `2` `3` `4` `5` / botões | Construir Muro / Tenda / Balista, Reparar, Construir Tesla |
+| `1` `2` `3` `4` `5` `6` / botões | Construir Muro / Tenda / Balista, Reparar, Construir Tesla, Construir Torre de Vigia |
 | `Esc` | Cancela modo/seleção; sem seleção abre o menu (pausa) |
 | `F` / item do menu | Liga/desliga a névoa de guerra |
 | `M` / item do menu | Liga/desliga a música |
@@ -33,7 +33,7 @@ python -m unittest discover -s tests -t .
 ## Editor de mapas
 Menu → **Editor de Mapas** (`E`) ou `python main.py --editor`.
 - **Ferramentas** (painel lateral): terreno (Campo, Floresta, Pedreira, Água), construções
-  (CC, Tenda, Muro, Balista, Tesla, Casa Infectada), unidades (Soldado, Ranger), os 5 tipos de
+  (CC, Tenda, Muro, Balista, Tesla, Torre de Vigia, Casa Infectada), unidades (Soldado, Ranger), os 5 tipos de
   zumbi e Borracha. Clique e **arraste** para pintar (ótimo para linhas de muro); botão direito apaga.
 - **Qtd** (`[` `]`): zumbis por enxame (limitado pela pilha máx. do tipo) e recurso do depósito.
   **Pincel** (`B`): 1x1 ou 3x3 para terreno/borracha.
@@ -101,6 +101,16 @@ Só se constrói dentro do território (contorno azul no mapa): raio 4 do CC e r
 **Torre Tesla** (`5`, 1 AP, 3 Ouro, 2 Madeira, HP 4). Tendas, Balistas e Muros não expandem.
 Construa Teslas na borda para avançar; se uma Tesla cair, o território dela some.
 
+## Torre de Vigia
+**Torre de Vigia** (`6`, 2 AP, 2 Ouro, 4 Madeira, 1 Pedra, HP 10) — como no They Are Billions:
+- Sozinha ela **não ataca**; mova um Soldado ou Ranger para o tile da torre (é destino, nunca
+  passagem). A unidade fica abrigada: **+2 alcance** e **+3 visão**.
+- Zumbis atacam a **torre**, não a unidade (Harpias não saltam torres ocupadas). Se a torre cair,
+  a unidade fica exposta nos escombros.
+- Na fase de Defesas, a unidade abrigada que **não agiu** no turno dispara de graça (sem AP) no
+  enxame visível mais próximo, com o ruído normal da arma. Atacar manualmente também usa o alcance
+  bônus. Para sair, basta mover a unidade para outro tile.
+
 ## Terreno
 Só o **Campo** é atravessável. **Floresta**, **Pedreira** e **Água** bloqueiam o movimento de todas
 as unidades e de todos os zumbis (inclusive Harpias, que só saltam construções). Florestas e
@@ -112,7 +122,7 @@ isolados (eles viram Floresta), e as ondas entram por tiles da borda com caminho
 1. **Jogador** – gasta AP global (construir, reparar, atacar, coletar). Cada unidade move 1× e age 1×.
 2. **Som** – ações emitem ruído (raio Manhattan); enxames no raio são atraídos à fonte.
 3. **Zumbis** – enxames tipados (pilhas por tile) seguem campo de fluxo Dijkstra até alvos civis/som; pilhas do mesmo tipo se fundem.
-4. **Defesas** – Balistas disparam automaticamente.
+4. **Defesas** – Balistas disparam automaticamente; unidades ociosas em Torres de Vigia também.
 5. **Ataque/Infecção** – enxames atacam vizinhos (Cuspidores à distância); Tenda com HP 0 vira Casa Infectada que gera zumbis.
 6. **Fim de rodada** – produção de ouro, ondas programadas na borda anunciada, checagem de vitória.
 
@@ -122,7 +132,7 @@ Edite no Excel/LibreOffice ou num editor de texto e **reinicie o jogo** para apl
 
 | Arquivo | Colunas principais |
 |---|---|
-| `data/buildings.csv` | `buildable` (aparece nos botões), custo `ap/gold/wood/stone`, `hp`, `noise` (ao construir), `gold_income`, `vision`, `build_radius` (território), `attack_range`/`damage`/`attack_noise` (defesa automática), `spawn` (Casa Infectada) |
+| `data/buildings.csv` | `buildable` (aparece nos botões), custo `ap/gold/wood/stone`, `hp`, `noise` (ao construir), `gold_income`, `vision`, `build_radius` (território), `attack_range`/`damage`/`attack_noise` (defesa automática), `spawn` (Casa Infectada), `garrison`/`range_bonus`/`vision_bonus` (abrigo de unidade e bônus concedidos — Torre de Vigia) |
 | `data/units.csv` | `hp`, `move`, `attack_range`, `damage`, `noise` (ao atacar), `vision` |
 | `data/zombies.csv` | `hp` (por zumbi), `speed`, `attack` (dano por zumbi), `max_stack` (≤ 10), `attack_range`, `structure_mult`, `flying`, `hearing`, `color` (`#rrggbb`), `description` |
 | `data/waves.csv` | `turn` (chega ao fim dele), `direction` (`N`, `S`, `L`, `O` ou `?` = sorteada; `?1`/`?2` = bordas sorteadas distintas no mesmo turno), `kind`, `swarms`, `size`, `final` (1 = horda final, um único turno) |
@@ -141,7 +151,7 @@ Edite no Excel/LibreOffice ou num editor de texto e **reinicie o jogo** para apl
 - `game/stats.py` – leitura/validação dos CSVs
 - `game/config.py` – regras gerais, layout, cores
 - `game/grid.py` – `Grid`, `Tile`, `Terrain`, distâncias, BFS/Dijkstra
-- `game/entities.py` – `Building` (CC, Tenda, Muro, Balista, Tesla, Casa Infectada), `Unit` (Soldado, Ranger), `ZombieSwarm` (tipado)
+- `game/entities.py` – `Building` (CC, Tenda, Muro, Balista, Tesla, Torre de Vigia, Casa Infectada), `Unit` (Soldado, Ranger), `ZombieSwarm` (tipado)
 - `game/world.py` – regras e simulação (sem pygame)
 - `game/turns.py` – máquina de estados das fases
 - `game/renderer.py` – câmera (offset/zoom) e desenho

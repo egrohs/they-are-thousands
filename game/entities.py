@@ -51,6 +51,9 @@ class Building(Entity):
         self.attack_range = stats.attack_range   # >0: dispara automaticamente
         self.damage = stats.damage
         self.vision = stats.vision
+        self.garrison = stats.garrison           # abriga uma unidade no próprio tile
+        self.range_bonus = stats.range_bonus
+        self.vision_bonus = stats.vision_bonus
         super().__init__(pos, stats.hp)
 
 
@@ -81,6 +84,12 @@ class Tesla(Building):
     color_key = "tesla"
 
 
+class Watchtower(Building):
+    """Torre de Vigia: uma unidade entra (dividindo o tile) e ganha alcance, visão e proteção."""
+    kind = "watchtower"
+    color_key = "watchtower"
+
+
 class InfectedHouse(Building):
     kind = "infected"
     hostile = True
@@ -92,6 +101,7 @@ BUILDING_TYPES: dict[str, type[Building]] = {
     "tent": Tent,
     "ballista": Ballista,
     "tesla": Tesla,
+    "watchtower": Watchtower,
 }
 
 

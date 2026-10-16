@@ -43,6 +43,9 @@ class BuildingStats:
     damage: int = 0
     attack_noise: int = 0
     spawn: int = 0            # zumbis gerados por turno (Casa Infectada)
+    garrison: bool = False    # abriga 1 unidade (Torre de Vigia)
+    range_bonus: int = 0      # bônus de alcance da unidade abrigada
+    vision_bonus: int = 0     # bônus de visão da unidade abrigada
     notes: str = ""
 
     @property
@@ -110,7 +113,7 @@ def direction_token(text: str) -> "int | str | None":
 
 FREE_TEXT = {"notes", "description", "name", "symbol"}
 MIN_VALUES = {"swarms": 1, "size": 1, "hp": 1, "max_stack": 1, "attack_range": 0, "attack": 0, "structure_mult": 0}
-REQUIRED_BUILDINGS = {"hq", "tent", "wall", "ballista", "tesla", "infected"}
+REQUIRED_BUILDINGS = {"hq", "tent", "wall", "ballista", "tesla", "watchtower", "infected"}
 REQUIRED_UNITS = {"soldier", "ranger"}
 REQUIRED_ZOMBIES = {"walker"}  # gerado por Casas Infectadas
 TRUE = {"1", "true", "sim", "s", "yes", "y", "x"}

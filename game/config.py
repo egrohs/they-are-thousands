@@ -108,6 +108,7 @@ COLORS: dict[str, tuple[int, int, int]] = {
     "wall": (138, 128, 118),
     "ballista": (168, 96, 44),
     "tesla": (90, 210, 230),
+    "watchtower": (150, 110, 70),
     "territory": (120, 200, 255),
     "fog_unexplored": (6, 6, 9),
     "fog_explored": (10, 10, 18),

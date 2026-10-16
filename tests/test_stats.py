@@ -14,7 +14,12 @@ class StatsFilesTest(unittest.TestCase):
         stats = load_stats(DATA_DIR)
         self.assertEqual(set(stats.units), {"soldier", "ranger"})
         self.assertIn("walker", stats.zombies)
-        self.assertEqual(set(BUILD_SPECS), {"wall", "tent", "ballista", "tesla"})
+        self.assertEqual(set(BUILD_SPECS), {"wall", "tent", "ballista", "tesla", "watchtower"})
+        tower = BUILDING_STATS["watchtower"]
+        self.assertTrue(tower.garrison)
+        self.assertGreater(tower.range_bonus, 0)
+        self.assertGreater(tower.vision_bonus, 0)
+        self.assertFalse(BUILDING_STATS["ballista"].garrison)
         self.assertEqual(BUILD_SPECS["ballista"].cost, {"gold": 6, "wood": 4, "stone": 3})
         self.assertTrue(ZOMBIE_SPECS["harpy"].flying)
         self.assertEqual(ZOMBIE_SPECS["walker"].color, (0x69, 0x24, 0x24))
@@ -92,7 +97,7 @@ class StatsParsingTest(unittest.TestCase):
 
     def test_unknown_building_rejected(self):
         with (self.tmp / "buildings.csv").open("a", encoding="utf-8") as f:
-            f.write("castle,Castelo,K,1,5,0,0,0,30,0,0,0,0,0,0,0,0,\n")
+            f.write("castle,Castelo,K,1,5,0,0,0,30,0,0,0,0,0,0,0,0,0,0,0,\n")
         with self.assertRaisesRegex(StatsError, "castle"):
             load_stats(self.tmp)
 

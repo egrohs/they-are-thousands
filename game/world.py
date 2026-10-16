@@ -135,6 +135,28 @@ class World:
     def update_fog(self) -> None:
         self.fog.update()
 
+    def shelter_of(self, unit: Unit) -> Optional[Building]:
+        """Torre de Vigia que abriga a unidade (mesmo tile), se houver."""
+        b = self.grid.tile(unit.pos).building
+        return b if b is not None and b.garrison and b.alive else None
+
+    def garrisoned(self, building: Building) -> Optional[Unit]:
+        if not building.garrison:
+            return None
+        return self.grid.tile(building.pos).unit
+
+    def unit_range(self, unit: Unit) -> int:
+        shelter = self.shelter_of(unit)
+        return unit.attack_range + (shelter.range_bonus if shelter else 0)
+
+    def _can_enter_shelter(self, pos: Pos) -> bool:
+        if not self.fog.is_explored(pos):
+            return False
+        tile = self.grid.tile(pos)
+        b = tile.building
+        return (b is not None and b.garrison and b.alive and not b.hostile and tile.unit is None
+                and tile.swarm is None)
+
     def infected_houses(self) -> list[InfectedHouse]:
         return [b for b in self.grid.buildings() if isinstance(b, InfectedHouse)]
 
@@ -318,6 +340,13 @@ class World:
         if self.game_over or unit.moved or not unit.alive:
             return {}
         reach = self.grid.bfs_reachable(unit.pos, unit.move_range, self._unit_passable)
+        # Torres de Vigia vazias são destino (não passagem)
+        for p, steps in list(reach.items()):
+            if steps >= unit.move_range:
+                continue
+            for n in self.grid.neighbors4(p):
+                if self._can_enter_shelter(n) and reach.get(n, INF) > steps + 1:
+                    reach[n] = steps + 1
         reach.pop(unit.pos, None)
         return reach
 
@@ -339,6 +368,15 @@ class World:
             return False
         unit.moved = True
         for step in self._path_to(unit.pos, dest, reach):
+            if step == dest and self._can_enter_shelter(step):
+                tower = self.grid.tile(step).building
+                self.grid.remove_unit(unit)
+                unit.pos = step
+                self.grid.tile(step).unit = unit
+                self.update_fog()
+                self.message(f"{unit.name} entrou na {tower.name} (+{tower.range_bonus} alcance, "
+                             f"+{tower.vision_bonus} visão).")
+                break
             if not self.grid.is_free(step):
                 tile = self.grid.tile(step)
                 if tile.swarm is not None:
@@ -354,7 +392,7 @@ class World:
         if self.game_over or unit.acted or not unit.alive or self.ap < ATTACK_AP:
             return []
         targets = []
-        for p in self.grid.tiles_in_radius(unit.pos, unit.attack_range, "chebyshev"):
+        for p in self.grid.tiles_in_radius(unit.pos, self.unit_range(unit), "chebyshev"):
             if not self.fog.is_visible(p):
                 continue
             t = self.grid.tile(p)
@@ -500,7 +538,9 @@ class World:
         targets: list[Entity] = []
         for p in cells:
             t = self.grid.tile(p)
-            if t.unit is not None and t.unit.alive:
+            if t.building is not None and t.building.garrison and t.building.alive:
+                targets.append(t.building)  # unidade abrigada fica protegida pela torre
+            elif t.unit is not None and t.unit.alive:
                 targets.append(t.unit)
             elif t.building is not None and not t.building.hostile and t.building.alive:
                 targets.append(t.building)
@@ -525,7 +565,7 @@ class World:
         for _, n in candidates:
             tile = self.grid.tile(n)
             b = tile.building
-            if swarm.flying and b is not None and not b.hostile and not b.civil:
+            if swarm.flying and b is not None and not b.hostile and not b.civil and tile.unit is None:
                 dest = self._leap_target(swarm, n)
                 if dest is not None:
                     self.grid.move_swarm(swarm, dest)
@@ -599,6 +639,29 @@ class World:
             self.message(f"{b.name} em {b.pos} abateu {killed} {target.name}(s).")
             if not target.alive:
                 self.grid.remove_swarm(target)
+        self.garrisons_fire()
+
+    def garrisons_fire(self) -> None:
+        """Unidades abrigadas em Torres de Vigia que não agiram no turno disparam sozinhas."""
+        for tower in sorted((b for b in self.grid.buildings() if b.garrison and b.alive),
+                            key=lambda b: b.pos):
+            unit = self.garrisoned(tower)
+            if unit is None or unit.acted or not unit.alive:
+                continue
+            reach = self.unit_range(unit)
+            in_range = [s for s in self.grid.swarms()
+                        if Grid.chebyshev(tower.pos, s.pos) <= reach and self.fog.is_visible(s.pos)]
+            if not in_range:
+                continue
+            target = min(in_range, key=lambda s: (Grid.chebyshev(tower.pos, s.pos), -s.count, s.pos))
+            killed = target.kill(unit.damage)
+            unit.acted = True
+            self.zombies_killed += killed
+            self.effects.append(Effect(tower.pos, target.pos, "shot"))
+            self.emit_noise(tower.pos, unit.noise, unit.name)
+            self.message(f"{unit.name} na {tower.name} abateu {killed} {target.name}(s).")
+            if not target.alive:
+                self.grid.remove_swarm(target)
 
     def _attack_priority(self, e: Entity) -> tuple:
         if isinstance(e, Unit):
@@ -642,8 +705,11 @@ class World:
             self.message("O Centro de Comando foi destruído!")
             self.check_defeat()
         elif isinstance(target, Building):
+            exposed = self.garrisoned(target)
             self.grid.remove_building(target)
             self.message(f"{target.name} em {target.pos} foi destruído(a).")
+            if exposed is not None:
+                self.message(f"{exposed.name} ficou exposto(a) nos escombros!")
 
     def resolve_infection(self) -> None:
         for b in self.grid.buildings():

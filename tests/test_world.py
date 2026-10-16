@@ -5,7 +5,8 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 from game.config import AP_PER_TURN, MAX_TURNS
 from game.stats import BUILD_SPECS
-from game.entities import InfectedHouse, Ranger, Soldier, Tent, Wall, ZombieSwarm
+from game.entities import InfectedHouse, Ranger, Soldier, Tent, Wall, Watchtower, ZombieSwarm
+from game.fog import FogOfWar
 from game.grid import Grid, Terrain
 from game.turns import Phase, TurnManager
 from game.world import World
@@ -82,6 +83,85 @@ class TerrainBlockingTests(unittest.TestCase):
             reach = w.grid.bfs_reachable(w.center, 999, passable)
             isolated = [t.pos for t in w.grid if t.terrain.passable and t.pos not in reach]
             self.assertEqual(isolated, [], seed)
+
+
+class WatchtowerTests(unittest.TestCase):
+    def setUp(self):
+        self.world = World(seed=11, fog_enabled=False)
+        for t in self.world.grid:
+            t.terrain, t.resource_amount = Terrain.GRASS, 0
+            t.building = t.unit = t.swarm = None
+        self.world.hq.pos = (20, 20)
+        self.world.grid.place_building(self.world.hq)
+        self.tower = Watchtower((6, 5))
+        self.world.grid.place_building(self.tower)
+        self.ranger = Ranger((5, 5))
+        self.world.grid.place_unit(self.ranger)
+
+    def enter(self):
+        self.assertTrue(self.world.move_unit(self.ranger, (6, 5)))
+        self.assertEqual(self.ranger.pos, (6, 5))
+        self.assertIs(self.world.grid.tile((6, 5)).unit, self.ranger)
+
+    def test_tower_is_buildable(self):
+        self.assertIn("watchtower", BUILD_SPECS)
+        self.assertTrue(self.tower.garrison)
+
+    def test_tower_is_destination_not_passage(self):
+        moves = self.world.unit_moves(self.ranger)
+        self.assertEqual(moves.get((6, 5)), 1)
+        for y in range(10):  # wall line behind the tower: no path through it
+            if y != 5:
+                self.world.grid.place_building(Wall((6, y)))
+        self.assertNotIn((7, 5), self.world.unit_moves(self.ranger))
+
+    def test_enter_and_leave_with_bonuses(self):
+        base_range = self.ranger.attack_range
+        base_vision = FogOfWar.vision_of(self.ranger)
+        self.enter()
+        self.assertIs(self.world.shelter_of(self.ranger), self.tower)
+        self.assertEqual(self.world.unit_range(self.ranger), base_range + self.tower.range_bonus)
+        self.world.fog.enabled = True
+        self.world.update_fog()
+        reach = max(base_vision, FogOfWar.vision_of(self.tower)) + self.tower.vision_bonus
+        self.assertTrue(self.world.fog.is_visible((6 + reach, 5)))
+        self.world.fog.enabled = False
+        self.ranger.moved = False
+        self.assertTrue(self.world.move_unit(self.ranger, (6, 6)))
+        self.assertIs(self.world.grid.tile((6, 5)).building, self.tower)
+        self.assertIsNone(self.world.grid.tile((6, 5)).unit)
+        self.assertEqual(self.world.unit_range(self.ranger), base_range)
+
+    def test_zombies_hit_tower_not_unit_and_expose_it(self):
+        self.enter()
+        swarm = ZombieSwarm((7, 5), 10, aggressive=True)
+        self.world.grid.place_swarm(swarm)
+        hp = self.ranger.hp
+        for _ in range(10):
+            if not self.tower.alive:
+                break
+            self.world.zombies_attack()
+        self.assertFalse(self.tower.alive)
+        self.assertEqual(self.ranger.hp, hp)
+        self.assertIsNone(self.world.grid.tile((6, 5)).building)
+        self.assertIs(self.world.grid.tile((6, 5)).unit, self.ranger)
+        self.world.zombies_attack()
+        self.assertLess(self.ranger.hp, hp)
+
+    def test_garrison_auto_fires_only_if_idle(self):
+        swarm = ZombieSwarm((6, 5 + self.world.unit_range(self.ranger) + self.tower.range_bonus), 5,
+                            aggressive=True)
+        self.world.grid.place_swarm(swarm)
+        self.world.garrisons_fire()
+        self.assertEqual(swarm.count, 5)  # not garrisoned yet
+        self.enter()
+        self.ranger.acted = True
+        self.world.garrisons_fire()
+        self.assertEqual(swarm.count, 5)
+        self.ranger.acted = False
+        self.world.garrisons_fire()
+        self.assertLess(swarm.count, 5)
+        self.assertTrue(self.ranger.acted)
 
 
 class ZombieTypeTests(unittest.TestCase):

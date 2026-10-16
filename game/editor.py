@@ -30,7 +30,7 @@ TERRAIN_TOOLS = {"t:grass": Terrain.GRASS, "t:forest": Terrain.FOREST,
 TOOL_LABELS: dict[str, str] = {
     "t:grass": "Campo", "t:forest": "Floresta", "t:rock": "Pedreira", "t:water": "Água",
     "b:hq": "CC", "b:tent": "Tenda", "b:wall": "Muro", "b:ballista": "Balista",
-    "b:tesla": "Tesla", "b:infected": "Casa Inf.",
+    "b:tesla": "Tesla", "b:watchtower": "Torre Vigia", "b:infected": "Casa Inf.",
     "u:soldier": "Soldado", "u:ranger": "Ranger",
     **{f"z:{k}": spec.name for k, spec in ZOMBIE_SPECS.items()},
     "erase": "Borracha",
@@ -325,7 +325,7 @@ class EditorScreen:
         y = section("Terreno")
         y = self._row(y, tools(TERRAIN_TOOLS), 4) + 4
         y = section("Construções")
-        y = self._row(y, tools(["b:hq", "b:tent", "b:wall", "b:ballista", "b:tesla",
+        y = self._row(y, tools(["b:hq", "b:tent", "b:wall", "b:ballista", "b:tesla", "b:watchtower",
                                 "b:infected"]), 3) + 4
         y = section("Unidades / Zumbis")
         y = self._row(y, tools(["u:soldier", "u:ranger", "erase"]

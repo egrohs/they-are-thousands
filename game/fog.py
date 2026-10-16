@@ -42,6 +42,9 @@ class FogOfWar:
         sources += [u for u in self.grid.units() if u.alive]
         for e in sources:
             r = self.vision_of(e)
+            shelter = self.grid.tile(e.pos).building
+            if shelter is not None and shelter is not e and shelter.garrison:
+                r = max(r, VISION_RADIUS.get(shelter.kind, 0)) + shelter.vision_bonus
             if r > 0:
                 visible.update(vision_tiles(self.grid, e.pos, r))
         self.visible = visible
