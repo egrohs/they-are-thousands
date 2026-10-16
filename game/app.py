@@ -210,6 +210,8 @@ class GameApp:
             self.music.next_track()
         elif event.key in (pygame.K_SPACE, pygame.K_RETURN):
             self.end_turn()
+        elif event.key in (pygame.K_z, pygame.K_BACKSPACE):
+            self.undo()
         elif event.key in MODE_KEYS:
             self.set_mode(MODE_KEYS[event.key])
 
@@ -223,6 +225,13 @@ class GameApp:
         self.ui.mode = None if self.ui.mode == mode else mode
         self.ui.selected_unit = None
 
+    def undo(self) -> None:
+        if not self.turns.is_player_phase:
+            return
+        if self.world.undo():
+            # unidades restauradas são novas instâncias: a seleção antiga ficaria órfã
+            self.ui.selected_unit = None
+
     def end_turn(self) -> None:
         if self.turns.end_player_turn():
             self.cancel()
@@ -232,6 +241,8 @@ class GameApp:
         if button is not None:
             if button.action == "end_turn":
                 self.end_turn()
+            elif button.action == "undo":
+                self.undo()
             elif button.action == "menu":
                 self.open_menu()
             else:

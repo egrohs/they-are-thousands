@@ -4,6 +4,8 @@ Esta camada não conhece pygame; é totalmente testável em modo headless.
 """
 from __future__ import annotations
 
+import copy
+import functools
 import random
 from dataclasses import dataclass
 from typing import Optional
@@ -13,7 +15,8 @@ from .config import (AGGRO_DISTANCE, AP_PER_TURN, ATTACK_AP,
                      GATHER_AP, GATHER_NOISE, GRID_H, GRID_W, MAX_TURNS,
                      NOISE_MEMORY_TURNS, REPAIR_AMOUNT, REPAIR_AP, REPAIR_NOISE, REPAIR_WOOD,
                      RESOURCE_LABELS, START_RESOURCES, START_SWARM_TYPES, WALL_BASH_COST,
-                     WANDER_CHANCE, WAVE_EDGE_DEPTH, WAVE_EDGE_SPREAD, CRATE_COUNT, CRATE_SPACING)
+                     WANDER_CHANCE, WAVE_EDGE_DEPTH, WAVE_EDGE_SPREAD, CRATE_COUNT, CRATE_SPACING,
+                     UNDO_LIMIT)
 from .entities import (BUILDING_TYPES, Building, CommandCenter, Entity, InfectedHouse,
                        Ranger, Soldier, Tent, Unit, ZombieSwarm)
 from .fog import FogOfWar
@@ -81,6 +84,29 @@ def edge_pos(side: int, along: int, depth: int = 0) -> Pos:
             2: (depth, along), 3: (GRID_W - 1 - depth, along)}[side]
 
 
+def undoable(action):
+    """Ação do jogador que pode ser desfeita. Guarda um snapshot antes; se a ação revelar
+    informação nova (névoa explorada, zumbis avistados, emboscada), o histórico é travado,
+    como em Into the Breach: não se pode voltar atrás depois de ver algo novo."""
+    @functools.wraps(action)
+    def wrapper(self: "World", *args, **kwargs):
+        snapshot = self._snapshot()
+        before = self._observation()
+        self._revealed = False
+        done = action(self, *args, **kwargs)
+        if done:
+            if self._revealed or self._observation_grew(before):
+                if self.history:
+                    self.message("Nova informação revelada: ações anteriores não podem mais "
+                                 "ser desfeitas.")
+                self.history.clear()
+            else:
+                self.history.append(snapshot)
+                del self.history[:-UNDO_LIMIT]
+        return done
+    return wrapper
+
+
 class World:
     def __init__(self, seed: Optional[int] = None, fog_enabled: bool = FOW_ENABLED_DEFAULT,
                  map_data: Optional[dict] = None):
@@ -107,6 +133,8 @@ class World:
         self.final_horde_spawned = False
         self.zombies_killed = 0
         self.crates_found = 0
+        self.history: list[dict] = []   # snapshots para desfazer (só no turno atual)
+        self._revealed = False
         if map_data is None:
             self._generate_map()
             self._place_crates()
@@ -118,6 +146,42 @@ class World:
         else:
             self.message(f"Semente do mapa: {self.seed}. Sobreviva {MAX_TURNS} turnos!")
         self._announce_next_wave()
+
+    # ======================================================================
+    # Desfazer
+    # ======================================================================
+    def _snapshot(self) -> dict:
+        state = {k: v for k, v in self.__dict__.items() if k != "history"}
+        return copy.deepcopy(state)
+
+    def _observation(self) -> tuple[int, set[int]]:
+        if not self.fog.enabled:
+            return 0, set()
+        seen = {id(s) for s in self.grid.swarms() if self.fog.is_visible(s.pos)}
+        return len(self.fog.explored), seen
+
+    def _observation_grew(self, before: tuple[int, set[int]]) -> bool:
+        explored, seen = self._observation()
+        return explored > before[0] or bool(seen - before[1])
+
+    @property
+    def can_undo(self) -> bool:
+        return bool(self.history) and not self.game_over
+
+    def undo(self) -> bool:
+        """Restaura o estado anterior à última ação do jogador neste turno.
+        O objeto World é mantido (referências externas continuam válidas), mas
+        construções/unidades são novas instâncias: seleções da UI devem ser limpas."""
+        if not self.can_undo:
+            self.message("Nada para desfazer.")
+            return False
+        history = self.history
+        state = history.pop()
+        self.__dict__.clear()
+        self.__dict__.update(state)
+        self.history = history
+        self.message(f"Ação desfeita ({len(history)} restante(s)).")
+        return True
 
     # ======================================================================
     # Utilidades
@@ -374,6 +438,7 @@ class World:
             return False, f"Faltam recursos: {missing}."
         return True, ""
 
+    @undoable
     def build(self, kind: str, pos: Pos) -> bool:
         ok, reason = self.can_build(kind, pos)
         if not ok:
@@ -404,6 +469,7 @@ class World:
             return False, "Madeira insuficiente."
         return True, ""
 
+    @undoable
     def repair(self, pos: Pos) -> bool:
         ok, reason = self.can_repair(pos)
         if not ok:
@@ -454,6 +520,7 @@ class World:
         path.reverse()
         return path
 
+    @undoable
     def move_unit(self, unit: Unit, dest: Pos) -> bool:
         reach = self.unit_moves(unit)
         if dest not in reach:
@@ -472,6 +539,7 @@ class World:
                 break
             if not self.grid.is_free(step):
                 tile = self.grid.tile(step)
+                self._revealed = True
                 if tile.swarm is not None:
                     self.message(f"Emboscada! {unit.name} topou com zumbis ocultos em {step}.")
                 else:
@@ -494,6 +562,7 @@ class World:
                 targets.append(p)
         return targets
 
+    @undoable
     def unit_attack(self, unit: Unit, pos: Pos) -> bool:
         if pos not in self.attack_targets(unit):
             self.message(f"{unit.name} não pode atacar {pos}.")
@@ -528,6 +597,7 @@ class World:
         return [p for p in self.grid.tiles_in_radius(unit.pos, 1, "chebyshev")
                 if self.grid.tile(p).terrain.resource and self.grid.tile(p).resource_amount > 0]
 
+    @undoable
     def unit_gather(self, unit: Unit, pos: Pos) -> bool:
         if pos not in self.gather_targets(unit):
             self.message(f"{unit.name} não pode coletar em {pos}.")
@@ -551,6 +621,7 @@ class World:
     # Fases automáticas
     # ======================================================================
     def begin_player_phase(self) -> None:
+        self.history.clear()
         self.ap = AP_PER_TURN
         for u in self.grid.units():
             u.reset_turn()
@@ -558,6 +629,7 @@ class World:
 
     def propagate_noise(self) -> None:
         """Fase de som: transforma eventos pendentes em mapa de decibéis e alerta enxames."""
+        self.history.clear()  # turno encerrado: nada mais pode ser desfeito
         self.effects.clear()
         events, self.pending_noise = self.pending_noise, []
         self.active_noise = events

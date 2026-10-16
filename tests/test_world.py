@@ -568,6 +568,100 @@ class FogTests(unittest.TestCase):
         self.assertTrue(fog.is_known((0, 0)))
 
 
+class UndoTests(unittest.TestCase):
+    def setUp(self):
+        self.world = World(seed=11, fog_enabled=False)
+        for t in self.world.grid:
+            t.terrain, t.resource_amount, t.crate = Terrain.GRASS, 0, None
+            t.building = t.unit = t.swarm = None
+        self.world.hq.pos = self.world.center
+        self.world.grid.place_building(self.world.hq)
+        self.world.resources.update(gold=50, wood=50, stone=50)
+        cx, cy = self.world.center
+        self.soldier = Soldier((cx + 2, cy))
+        self.world.grid.place_unit(self.soldier)
+
+    def test_empty_history(self):
+        self.assertFalse(self.world.can_undo)
+        self.assertFalse(self.world.undo())
+
+    def test_undo_build_restores_resources_ap_and_tile(self):
+        world = self.world
+        cx, cy = world.center
+        before = (dict(world.resources), world.ap, len(world.pending_noise))
+        self.assertTrue(world.build("wall", (cx - 2, cy)))
+        self.assertTrue(world.can_undo)
+        self.assertTrue(world.undo())
+        self.assertIsNone(world.grid.tile((cx - 2, cy)).building)
+        self.assertEqual((dict(world.resources), world.ap, len(world.pending_noise)), before)
+        self.assertFalse(world.can_undo)
+
+    def test_failed_action_is_not_recorded(self):
+        self.assertFalse(self.world.build("wall", (0, 0)))
+        self.assertFalse(self.world.can_undo)
+
+    def test_undo_move_and_multiple_steps(self):
+        world = self.world
+        cx, cy = world.center
+        identity = id(world)
+        start = self.soldier.pos
+        self.assertTrue(world.move_unit(self.soldier, (cx + 4, cy)))
+        self.assertTrue(world.build("wall", (cx - 2, cy)))
+        self.assertEqual(len(world.history), 2)
+        self.assertTrue(world.undo())
+        self.assertIsNone(world.grid.tile((cx - 2, cy)).building)
+        unit = world.grid.tile((cx + 4, cy)).unit
+        self.assertTrue(unit.moved)
+        self.assertTrue(world.undo())
+        self.assertIsNone(world.grid.tile((cx + 4, cy)).unit)
+        unit = world.grid.tile(start).unit
+        self.assertIsInstance(unit, Soldier)
+        self.assertFalse(unit.moved)
+        self.assertEqual(id(world), identity)
+
+    def test_undo_attack_restores_swarm(self):
+        world = self.world
+        sx, sy = self.soldier.pos
+        world.grid.place_swarm(ZombieSwarm((sx + 2, sy), 6))
+        self.assertTrue(world.unit_attack(self.soldier, (sx + 2, sy)))
+        kills = world.zombies_killed
+        self.assertTrue(world.undo())
+        self.assertEqual(world.grid.tile((sx + 2, sy)).swarm.count, 6)
+        self.assertFalse(world.grid.tile((sx, sy)).unit.acted)
+        self.assertLessEqual(world.zombies_killed, kills)
+
+    def test_history_cleared_at_end_of_turn(self):
+        world = self.world
+        cx, cy = world.center
+        world.build("wall", (cx - 2, cy))
+        tm = TurnManager(world, phase_delay=0)
+        tm.end_player_turn()
+        tm.resolve_instantly()
+        self.assertFalse(world.can_undo)
+
+    def test_revealing_fog_locks_history(self):
+        world = self.world
+        cx, cy = world.center
+        world.fog.enabled = True
+        world.update_fog()
+        self.assertTrue(world.build("wall", (cx - 2, cy)))
+        self.assertTrue(world.can_undo)
+        far = (cx + 2 + self.soldier.move_range, cy)
+        self.assertGreater(len(set(world.fog.explored)), 0)
+        self.assertTrue(world.move_unit(self.soldier, far))
+        self.assertFalse(world.can_undo)
+        self.assertIsNotNone(world.grid.tile((cx - 2, cy)).building)
+
+    def test_move_without_reveal_is_undoable_with_fog(self):
+        world = self.world
+        cx, cy = world.center
+        world.fog.enabled = True
+        world.fog.explored.update(t.pos for t in world.grid)
+        world.update_fog()
+        self.assertTrue(world.move_unit(self.soldier, (cx + 3, cy)))
+        self.assertTrue(world.can_undo)
+
+
 class TurnFlowTests(unittest.TestCase):
     def test_full_game_runs_to_completion_deterministically(self):
         results = []

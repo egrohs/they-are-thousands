@@ -84,6 +84,8 @@ START_SWARM_TYPES = (("walker", 4), ("runner", 1))
 # visão + FOG_MEMORY_MARGIN tiles de alguma unidade/construção aliada; além disso, escuridão total
 FOG_MEMORY_MARGIN = 3
 
+UNDO_LIMIT = 30         # ações do jogador que podem ser desfeitas por turno
+
 # caixas de recursos (tipos em data/crates.csv): espalhadas fora da base nos mapas aleatórios
 CRATE_COUNT = 7
 CRATE_SPACING = 3       # distância Chebyshev mínima entre caixas

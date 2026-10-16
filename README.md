@@ -27,8 +27,20 @@ python -m unittest discover -s tests -t .
 | `G` | Alterna sprites / placeholders geométricos |
 | Botão direito | Cancela modo/seleção |
 | `Espaço` / botão | Encerrar turno |
+| `Z` / `Backspace` / botão | Desfazer última ação (veja abaixo) |
 | WASD/Setas, botão do meio, roda | Câmera e zoom |
 | `Ctrl+R` (ou `R` no fim) | Reinicia (mesmo mapa personalizado, ou novo aleatório) |
+
+## Desfazer
+
+Construir, reparar, mover, atacar e coletar podem ser desfeitos (`Z`, `Backspace` ou botão
+**Desfazer (N)**), em sequência, até 30 ações (`UNDO_LIMIT` em `config.py`):
+
+- vale só para o turno atual: ao encerrar o turno o histórico é apagado;
+- estilo Into the Breach: se uma ação **revela informação** (explora névoa, avista zumbis novos ou
+  sofre emboscada), ela e todas as anteriores ficam travadas;
+- com a FOW desligada nada é revelado, então o desfazer está sempre disponível;
+- abrir caixas não trava o histórico (o conteúdo já aparece na inspeção).
 
 ## Editor de mapas
 Menu → **Editor de Mapas** (`E`) ou `python main.py --editor`.

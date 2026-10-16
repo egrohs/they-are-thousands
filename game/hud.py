@@ -105,7 +105,8 @@ class HUD:
                    _cost_text("sawmill")),
             Button(pygame.Rect(x + half + 8, y + 150, half, 44), f"[8] {_name('quarry')}",
                    "quarry", _cost_text("quarry")),
-            Button(pygame.Rect(x, y + 202, w, 38), "Encerrar Turno  [Espaço]", "end_turn"),
+            Button(pygame.Rect(x, y + 202, 118, 38), "Desfazer [Z]", "undo"),
+            Button(pygame.Rect(x + 126, y + 202, w - 126, 38), "Encerrar Turno  [Espaço]", "end_turn"),
         ]
         self.info_top = y + 250
         self.menu_button = Button(pygame.Rect(rect.right - 84, 10, 72, 26), "Menu", "menu")
@@ -169,7 +170,10 @@ class HUD:
 
         enabled = turns.is_player_phase and not world.game_over
         for b in self.buttons:
-            b.draw(surface, self, b.rect.collidepoint(mouse_pos), ui.mode == b.action, enabled,
+            on = enabled and (world.can_undo if b.action == "undo" else True)
+            if b.action == "undo":
+                b.label = f"Desfazer ({len(world.history)})" if world.history else "Desfazer [Z]"
+            b.draw(surface, self, b.rect.collidepoint(mouse_pos), ui.mode == b.action, on,
                    COLORS["end_turn"] if b.action == "end_turn" else None)
         self.menu_button.draw(surface, self, self.menu_button.rect.collidepoint(mouse_pos),
                               False, True)
