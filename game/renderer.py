@@ -19,7 +19,7 @@ class UIState:
     hover_tile: Optional[Pos] = None
     selected_tile: Optional[Pos] = None
     selected_unit: Optional[Unit] = None
-    mode: Optional[str] = None  # "wall" | "tent" | "ballista" | "repair"
+    mode: Optional[str] = None  # "wall" | "tent" | "ballista" | "tesla" | "repair"
     move_tiles: set[Pos] = field(default_factory=set)
     attack_tiles: set[Pos] = field(default_factory=set)
     gather_tiles: set[Pos] = field(default_factory=set)
@@ -158,6 +158,7 @@ class Renderer:
             self._draw_terrain(surface, cam.tile_rect(t.pos), t.terrain, t.resource_amount, ts)
 
         self._draw_overlays(surface, world, cam, ui)
+        self._draw_territory_border(surface, world, cam)
 
         for t in visible:
             rect = cam.tile_rect(t.pos)
@@ -232,6 +233,20 @@ class Renderer:
             tl = cam.tile_rect((u.pos[0] - r, u.pos[1] - r)).topleft
             br = cam.tile_rect((u.pos[0] + r, u.pos[1] + r)).bottomright
             pygame.draw.rect(surface, COLORS["attack"], pygame.Rect(tl, (br[0] - tl[0], br[1] - tl[1])), 1)
+
+    def _draw_territory_border(self, surface, world: World, cam: Camera) -> None:
+        zone = world.build_zone()
+        color = COLORS["territory"]
+        for x, y in zone:
+            r = cam.tile_rect((x, y))
+            if (x, y - 1) not in zone:
+                pygame.draw.line(surface, color, r.topleft, (r.right - 1, r.top), 2)
+            if (x, y + 1) not in zone:
+                pygame.draw.line(surface, color, (r.left, r.bottom - 1), (r.right - 1, r.bottom - 1), 2)
+            if (x - 1, y) not in zone:
+                pygame.draw.line(surface, color, r.topleft, (r.left, r.bottom - 1), 2)
+            if (x + 1, y) not in zone:
+                pygame.draw.line(surface, color, (r.right - 1, r.top), (r.right - 1, r.bottom - 1), 2)
 
     def _draw_building(self, surface, rect: pygame.Rect, b: Building, ts) -> None:
         inner = rect.inflate(-max(2, int(ts * 0.1)), -max(2, int(ts * 0.1)))

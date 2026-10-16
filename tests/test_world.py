@@ -48,6 +48,21 @@ class WorldTests(unittest.TestCase):
         ok, _ = self.world.can_build("wall", (0, 0))
         self.assertFalse(ok)
 
+    def test_only_tesla_expands_territory(self):
+        edge = (self.cx + 4, self.cy)
+        beyond = (self.cx + 6, self.cy)
+        for p in (edge, beyond, (self.cx + 5, self.cy)):
+            t = self.world.grid.tile(p)
+            t.terrain, t.building, t.unit = Terrain.GRASS, None, None
+        self.world.resources.update(gold=50, wood=50, stone=50)
+        self.assertFalse(self.world.in_build_range(beyond))
+        self.assertTrue(self.world.build("tent", edge))
+        self.assertFalse(self.world.in_build_range(beyond))
+        self.world.grid.remove_building(self.world.grid.tile(edge).building)
+        self.assertTrue(self.world.build("tesla", edge))
+        self.assertTrue(self.world.in_build_range(beyond))
+        self.assertTrue(self.world.can_build("wall", beyond)[0])
+
     def test_noise_alerts_swarm(self):
         swarm = ZombieSwarm((self.cx + 6, self.cy), 3)
         self.world.grid.place_swarm(swarm)

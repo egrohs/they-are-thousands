@@ -14,11 +14,16 @@ python -m unittest discover -s tests -t .
 | Entrada | Ação |
 |---|---|
 | Clique em unidade | Seleciona (azul = mover, vermelho = atacar, amarelo = coletar) |
-| `1` `2` `3` `4` / botões | Construir Muro / Tenda / Balista, Reparar |
+| `1` `2` `3` `4` `5` / botões | Construir Muro / Tenda / Balista, Reparar, Construir Tesla |
 | Botão direito / `Esc` | Cancela modo/seleção |
 | `Espaço` / botão | Encerrar turno |
 | WASD/Setas, botão do meio, roda | Câmera e zoom |
 | `Ctrl+R` (ou `R` no fim) | Novo mapa |
+
+## Território
+Só se constrói dentro do território (contorno azul no mapa): raio 4 do CC e raio 3 de cada
+**Torre Tesla** (`5`, 1 AP, 3 Ouro, 2 Madeira, HP 4). Tendas, Balistas e Muros não expandem.
+Construa Teslas na borda para avançar; se uma Tesla cair, o território dela some.
 
 ## Fases do turno
 1. **Jogador** – gasta AP global (construir, reparar, atacar, coletar). Cada unidade move 1× e age 1×.
@@ -31,7 +36,7 @@ python -m unittest discover -s tests -t .
 ## Estrutura
 - `game/config.py` – balanceamento, custos, cores
 - `game/grid.py` – `Grid`, `Tile`, `Terrain`, distâncias, BFS/Dijkstra
-- `game/entities.py` – `Building` (CC, Tenda, Muro, Balista, Casa Infectada), `Unit` (Soldado, Ranger), `ZombieSwarm`
+- `game/entities.py` – `Building` (CC, Tenda, Muro, Balista, Tesla, Casa Infectada), `Unit` (Soldado, Ranger), `ZombieSwarm`
 - `game/world.py` – regras e simulação (sem pygame)
 - `game/turns.py` – máquina de estados das fases
 - `game/renderer.py` – câmera (offset/zoom) e desenho

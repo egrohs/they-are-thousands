@@ -4,8 +4,9 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-from .config import (BALLISTA_DAMAGE, BALLISTA_RANGE, BUILD_SPECS, HQ_GOLD_INCOME, HQ_HP,
-                     INFECTED_HP, MAX_SWARM_SIZE, UNIT_SPECS)
+from .config import (BALLISTA_DAMAGE, BALLISTA_RANGE, BUILD_SPECS, HQ_BUILD_RADIUS,
+                     HQ_GOLD_INCOME, HQ_HP, INFECTED_HP, MAX_SWARM_SIZE, TESLA_BUILD_RADIUS,
+                     UNIT_SPECS)
 from .grid import Pos
 
 
@@ -40,6 +41,7 @@ class Building(Entity):
     civil = False       # alvo prioritário dos zumbis (gera campo de atração)
     hostile = False     # pertence aos zumbis
     gold_income = 0
+    build_radius = 0    # >0: expande o território construível
 
 
 class CommandCenter(Building):
@@ -48,6 +50,7 @@ class CommandCenter(Building):
     symbol = "CC"
     civil = True
     gold_income = HQ_GOLD_INCOME
+    build_radius = HQ_BUILD_RADIUS
     color_key = "hq"
 
     def __init__(self, pos: Pos):
@@ -81,6 +84,12 @@ class Ballista(_SpecBuilding):
     damage = BALLISTA_DAMAGE
 
 
+class Tesla(_SpecBuilding):
+    kind = "tesla"
+    color_key = "tesla"
+    build_radius = TESLA_BUILD_RADIUS
+
+
 class InfectedHouse(Building):
     kind = "infected"
     name = "Casa Infectada"
@@ -96,6 +105,7 @@ BUILDING_TYPES: dict[str, type[_SpecBuilding]] = {
     "wall": Wall,
     "tent": Tent,
     "ballista": Ballista,
+    "tesla": Tesla,
 }
 
 

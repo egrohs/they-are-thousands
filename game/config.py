@@ -19,7 +19,8 @@ CAMERA_PAN_SPEED = 600  # px/s
 # --- Regras gerais --------------------------------------------------------
 MAX_TURNS = 15
 AP_PER_TURN = 6
-BUILD_RADIUS = 3            # Chebyshev a partir de CC / Tenda / Balista
+HQ_BUILD_RADIUS = 4         # território (Chebyshev) ao redor do Centro de Comando
+TESLA_BUILD_RADIUS = 3      # território (Chebyshev) ao redor de cada Torre Tesla
 MAX_SWARM_SIZE = 10
 ZOMBIE_SPEED = 2            # passos por turno para enxames agressivos
 AGGRO_DISTANCE = 7          # custo de caminho até alvo civil que desperta enxames ociosos
@@ -89,6 +90,7 @@ BUILD_SPECS: dict[str, BuildSpec] = {
     "wall": BuildSpec("Muro", "M", ap=1, gold=0, wood=2, stone=0, hp=10, noise=2),
     "tent": BuildSpec("Tenda", "T", ap=2, gold=4, wood=4, stone=0, hp=6, noise=2, gold_income=3),
     "ballista": BuildSpec("Balista", "B", ap=3, gold=6, wood=4, stone=3, hp=8, noise=4),
+    "tesla": BuildSpec("Tesla", "E", ap=1, gold=3, wood=2, stone=0, hp=4, noise=1),
 }
 
 UNIT_SPECS: dict[str, UnitSpec] = {
@@ -118,6 +120,8 @@ COLORS: dict[str, tuple[int, int, int]] = {
     "tent": (222, 192, 122),
     "wall": (138, 128, 118),
     "ballista": (168, 96, 44),
+    "tesla": (90, 210, 230),
+    "territory": (120, 200, 255),
     "infected": (120, 180, 40),
     "soldier": (60, 140, 235),
     "ranger": (80, 205, 145),

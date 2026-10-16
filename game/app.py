@@ -13,7 +13,8 @@ from .renderer import Camera, Renderer, UIState
 from .turns import TurnManager
 from .world import World
 
-MODE_KEYS = {pygame.K_1: "wall", pygame.K_2: "tent", pygame.K_3: "ballista", pygame.K_4: "repair"}
+MODE_KEYS = {pygame.K_1: "wall", pygame.K_2: "tent", pygame.K_3: "ballista", pygame.K_4: "repair",
+             pygame.K_5: "tesla"}
 
 
 class GameApp:

@@ -7,7 +7,7 @@ from typing import Optional
 import pygame
 
 from .config import (BUILD_SPECS, COLORS, FINAL_HORDE_TURN, MAX_TURNS, REPAIR_AP, REPAIR_WOOD,
-                     RESOURCE_LABELS)
+                     RESOURCE_LABELS, TESLA_BUILD_RADIUS)
 from .grid import Pos
 from .renderer import UIState
 from .turns import TurnManager
@@ -78,9 +78,11 @@ class HUD:
             Button(pygame.Rect(x, y + 50, half, 44), "[3] Balista", "ballista", _cost_text("ballista")),
             Button(pygame.Rect(x + half + 8, y + 50, half, 44), "[4] Reparar", "repair",
                    f"{REPAIR_AP} AP | {REPAIR_WOOD} Ma | +5 HP"),
-            Button(pygame.Rect(x, y + 102, w, 38), "Encerrar Turno  [Espaço]", "end_turn"),
+            Button(pygame.Rect(x, y + 100, w, 44), "[5] Tesla (expande território)", "tesla",
+                   _cost_text("tesla") + f" | raio {TESLA_BUILD_RADIUS}"),
+            Button(pygame.Rect(x, y + 152, w, 38), "Encerrar Turno  [Espaço]", "end_turn"),
         ]
-        self.info_top = y + 152
+        self.info_top = y + 202
 
     def font(self, size: int) -> pygame.font.Font:
         if size not in self._fonts:

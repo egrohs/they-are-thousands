@@ -8,8 +8,8 @@ import random
 from dataclasses import dataclass
 from typing import Optional
 
-from .config import (AGGRO_DISTANCE, AP_PER_TURN, ATTACK_AP, BALLISTA_NOISE, BUILD_RADIUS,
-                     BUILD_SPECS, FINAL_HORDE, FINAL_HORDE_TURN, FOREST_MOVE_COST, GATHER_AMOUNT,
+from .config import (AGGRO_DISTANCE, AP_PER_TURN, ATTACK_AP, BALLISTA_NOISE, BUILD_SPECS,
+                     HQ_BUILD_RADIUS, TESLA_BUILD_RADIUS, FINAL_HORDE, FINAL_HORDE_TURN, FOREST_MOVE_COST, GATHER_AMOUNT,
                      GATHER_AP, GATHER_NOISE, GRID_H, GRID_W, INFECTED_SPAWN, MAX_TURNS,
                      NOISE_MEMORY_TURNS, REPAIR_AMOUNT, REPAIR_AP, REPAIR_NOISE, REPAIR_WOOD,
                      RESOURCE_LABELS, START_RESOURCES, WALL_BASH_COST, WANDER_CHANCE, WAVES,
@@ -147,12 +147,12 @@ class World:
     # ======================================================================
     def build_anchors(self) -> list[Building]:
         return [b for b in self.grid.buildings()
-                if b.alive and not b.hostile and b.kind in ("hq", "tent", "ballista")]
+                if b.alive and not b.hostile and b.build_radius > 0]
 
     def build_zone(self) -> set[Pos]:
         zone: set[Pos] = set()
         for b in self.build_anchors():
-            zone.update(self.grid.tiles_in_radius(b.pos, BUILD_RADIUS, "chebyshev"))
+            zone.update(self.grid.tiles_in_radius(b.pos, b.build_radius, "chebyshev"))
         return zone
 
     def in_build_range(self, pos: Pos, zone: Optional[set[Pos]] = None) -> bool:
@@ -173,7 +173,8 @@ class World:
         if tile.occupied:
             return False, "Tile ocupado."
         if not self.in_build_range(pos, zone):
-            return False, f"Fora da colônia (raio {BUILD_RADIUS} de CC/Tenda/Balista)."
+            return False, (f"Fora do território (raio {HQ_BUILD_RADIUS} do CC / "
+                           f"{TESLA_BUILD_RADIUS} de Tesla). Construa uma Tesla para expandir.")
         if self.ap < spec.ap:
             return False, f"AP insuficiente ({spec.ap} necessário)."
         missing = self._missing_resources(spec.cost)
