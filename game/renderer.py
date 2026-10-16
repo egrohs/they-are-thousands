@@ -7,12 +7,13 @@ from typing import Optional
 
 import pygame
 
-from .config import COLORS, EXHAUSTED_TINT, INFECTED_TINT, TILE_SIZE, ZOMBIE_TINTS
+from .config import (COLORS, EXHAUSTED_TINT, INFECTED_TINT, TILE_SIZE, WAVE_EDGE_SPREAD,
+                     WAVE_WARNING_TURNS, ZOMBIE_TINTS)
 from .entities import Building, Unit, ZombieSwarm
 from .grid import Pos, Terrain
 from .sprites import SpriteManager
-from .stats import BUILD_SPECS
-from .world import World
+from .stats import BUILD_SPECS, DIRECTION_NAMES
+from .world import World, edge_pos
 
 
 def swarm_sprite_key(kind: str) -> str:
@@ -194,6 +195,7 @@ class Renderer:
                 self._draw_swarm(surface, rect, t.swarm, ts)
 
         self._draw_pending_noise(surface, world, cam)
+        self._draw_wave_warning(surface, world, cam)
 
         for eff in world.effects:
             if not (fog.is_visible(eff.start) or fog.is_visible(eff.end)):
@@ -355,3 +357,73 @@ class Renderer:
             r = ev.radius * cam.tile_px + cam.tile_px / 2
             pts = [(c[0], c[1] - r), (c[0] + r, c[1]), (c[0], c[1] + r), (c[0] - r, c[1])]
             pygame.draw.polygon(surface, COLORS["noise"], pts, 1)
+
+    def _draw_wave_warning(self, surface, world: World, cam: Camera) -> None:
+        """Faixa vermelha na borda de entrada + seta (ou seta na borda da tela se fora de vista)."""
+        wave = world.next_wave
+        if wave is None:
+            return
+        left = wave.turn - world.turn
+        if left > WAVE_WARNING_TURNS:
+            return
+        blink = left == 0 and (pygame.time.get_ticks() // 400) % 2 == 0
+        color = COLORS["wave_warning"]
+        ts = cam.tile_px
+        label = ("HORDA" if wave.final else "ONDA") + ("!" if left == 0 else f" em {left}")
+        view = cam.viewport
+        for side, anchor in wave.entry_points:
+            along0 = anchor[0] if side in (0, 1) else anchor[1]
+            length = world.grid.width if side in (0, 1) else world.grid.height
+            for along in range(max(0, along0 - WAVE_EDGE_SPREAD),
+                               min(length, along0 + WAVE_EDGE_SPREAD + 1)):
+                rect = cam.tile_rect(edge_pos(side, along))
+                if rect.colliderect(view):
+                    self._overlay(surface, rect, color, 120 if blink else 70)
+            inward = {0: (0, 1), 1: (0, -1), 2: (1, 0), 3: (-1, 0)}[side]
+            c = cam.tile_rect(anchor).center
+            base = (c[0] - inward[0] * ts * 0.4, c[1] - inward[1] * ts * 0.4)
+            tip = (base[0] + inward[0] * ts * 1.6, base[1] + inward[1] * ts * 1.6)
+            if view.inflate(-int(ts), -int(ts)).collidepoint(c):
+                self._arrow(surface, base, tip, max(10, ts * 0.7), color)
+                text_at = (tip[0] + inward[0] * ts * 0.6, tip[1] + inward[1] * ts * 0.6)
+                if side in (2, 3):  # bordas laterais: texto acima da seta
+                    text_at = (base[0] + inward[0] * ts * 1.4, base[1] - ts * 0.8)
+                self._label(surface, label, text_at, max(16, ts * 0.6), color, view)
+                continue
+            # entrada fora da tela: seta presa à borda da viewport apontando para ela
+            box = view.inflate(-44, -44)
+            px = min(max(c[0], box.left), box.right)
+            py = min(max(c[1], box.top), box.bottom)
+            dx, dy = c[0] - px, c[1] - py
+            dist = math.hypot(dx, dy) or 1.0
+            ux, uy = dx / dist, dy / dist
+            self._arrow(surface, (px - ux * 18, py - uy * 18), (px + ux * 14, py + uy * 14), 16, color)
+            self._label(surface, f"{label} ({DIRECTION_NAMES[side]})",
+                        (px - ux * 30, py - uy * 30 + (0 if abs(uy) > 0.5 else -18)), 18, color, view)
+
+    def _label(self, surface, text: str, center, size, color, view: pygame.Rect) -> None:
+        """Texto com fundo escuro, mantido dentro da viewport."""
+        img = self.font(size).render(text, True, color)
+        rect = img.get_rect(center=(round(center[0]), round(center[1]))).inflate(8, 4)
+        rect.clamp_ip(view.inflate(-4, -4))
+        self._overlay(surface, rect, (0, 0, 0), 160)
+        surface.blit(img, img.get_rect(center=rect.center))
+
+    @staticmethod
+    def _arrow(surface, start, end, width, color) -> None:
+        dx, dy = end[0] - start[0], end[1] - start[1]
+        length = math.hypot(dx, dy) or 1.0
+        ux, uy = dx / length, dy / length
+        px, py = -uy, ux
+        head = min(length * 0.6, width * 1.1)
+        neck = (end[0] - ux * head, end[1] - uy * head)
+        shaft = width * 0.22
+        pts = [(start[0] + px * shaft, start[1] + py * shaft),
+               (neck[0] + px * shaft, neck[1] + py * shaft),
+               (neck[0] + px * width / 2, neck[1] + py * width / 2),
+               end,
+               (neck[0] - px * width / 2, neck[1] - py * width / 2),
+               (neck[0] - px * shaft, neck[1] - py * shaft),
+               (start[0] - px * shaft, start[1] - py * shaft)]
+        pygame.draw.polygon(surface, color, pts)
+        pygame.draw.polygon(surface, (0, 0, 0), pts, 1)

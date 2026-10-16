@@ -1,6 +1,7 @@
 """Stats de construções, unidades e zumbis lidos de CSVs em `data/` (balanceamento).
 
 * `data/buildings.csv`, `data/units.csv`, `data/zombies.csv` – uma linha por tipo, `id` como chave.
+* `data/waves.csv` – cronograma de ondas (turno, direção, tipo, enxames, tamanho).
 * Aceita separador `,` ou `;` e, com `;`, vírgula decimal (formato do Excel em pt-BR).
 * Colunas `notes`/`description` são livres; colunas desconhecidas geram erro (evita typos).
 * Erros viram `StatsError` com arquivo, linha e coluna.
@@ -14,7 +15,7 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any, TypeVar
 
-from .config import DATA_DIR, FINAL_HORDE, START_SWARM_TYPES, WAVES
+from .config import DATA_DIR, MAX_TURNS, START_SWARM_TYPES
 
 Color = tuple[int, int, int]
 
@@ -80,8 +81,35 @@ class ZombieSpec:
     description: str = ""
 
 
+@dataclass(frozen=True)
+class WaveRow:
+    """Grupo de uma onda programada (`data/waves.csv`); várias linhas podem ter o mesmo turno."""
+    turn: int                  # a onda chega ao fim deste turno
+    direction: str             # N, S, L, O; "?" (ou ?1, ?2...) = borda sorteada na partida
+    kind: str
+    swarms: int
+    size: int
+    final: bool = False        # pertence à horda final
+    notes: str = ""
+
+
+# lado da grade: 0 = norte (y=0), 1 = sul, 2 = oeste (x=0), 3 = leste
+DIRECTIONS = {"N": 0, "S": 1, "O": 2, "W": 2, "L": 3, "E": 3}
+DIRECTION_NAMES = {0: "Norte", 1: "Sul", 2: "Oeste", 3: "Leste"}
+
+
+def direction_token(text: str) -> "int | str | None":
+    """Converte a coluna `direction`: lado fixo (int) ou marcador de sorteio ("?1", "?2"...)."""
+    t = text.strip().upper()
+    if t in DIRECTIONS:
+        return DIRECTIONS[t]
+    if t.startswith("?") and (t[1:] == "" or t[1:].isdigit()):
+        return "?" + (t[1:] or "1")
+    return None
+
+
 FREE_TEXT = {"notes", "description", "name", "symbol"}
-MIN_VALUES = {"hp": 1, "max_stack": 1, "attack_range": 0, "attack": 0, "structure_mult": 0}
+MIN_VALUES = {"swarms": 1, "size": 1, "hp": 1, "max_stack": 1, "attack_range": 0, "attack": 0, "structure_mult": 0}
 REQUIRED_BUILDINGS = {"hq", "tent", "wall", "ballista", "tesla", "infected"}
 REQUIRED_UNITS = {"soldier", "ranger"}
 REQUIRED_ZOMBIES = {"walker"}  # gerado por Casas Infectadas
@@ -133,8 +161,8 @@ def _convert(raw: str, typ: Any, decimal_comma: bool) -> Any:
     raise TypeError(f"Tipo não suportado: {typ}")
 
 
-def read_table(path: Path, cls: type[T]) -> dict[str, T]:
-    """Lê `path` e converte cada linha em `cls` (dataclass), indexando por `id`."""
+def read_rows(path: Path, cls: type[T]) -> list[tuple[int, T]]:
+    """Lê `path` e converte cada linha em `cls` (dataclass); retorna (nº da linha, objeto)."""
     path = Path(path)
     try:
         text = path.read_text(encoding="utf-8-sig")
@@ -157,11 +185,11 @@ def read_table(path: Path, cls: type[T]) -> dict[str, T]:
     if missing:
         raise StatsError(f"{where}: faltam as colunas obrigatórias: {', '.join(sorted(missing))}.")
 
-    table: dict[str, T] = {}
+    rows: list[tuple[int, T]] = []
     for row in reader:
         line = reader.line_num
         if (not any(isinstance(v, str) and v.strip() for v in row.values())
-                or (row.get("id") or "").strip().startswith("#")):
+                or (next(iter(row.values()), "") or "").strip().startswith("#")):
             continue
         values: dict[str, Any] = {}
         for name, raw in row.items():
@@ -186,13 +214,39 @@ def read_table(path: Path, cls: type[T]) -> dict[str, T]:
                     raise StatsError(f"{where} linha {line}, coluna '{name}': deve ser "
                                      f">= {MIN_VALUES.get(name, 0)} (recebido {value}).")
             values[name] = value
-        key = values["id"]
+        rows.append((line, cls(**values)))
+    return rows
+
+
+def read_table(path: Path, cls: type[T]) -> dict[str, T]:
+    """Como `read_rows`, mas indexa pelo campo `id` (único e obrigatório)."""
+    table: dict[str, T] = {}
+    for line, obj in read_rows(path, cls):
+        key = getattr(obj, "id")
         if not key:
-            raise StatsError(f"{where} linha {line}: 'id' vazio.")
+            raise StatsError(f"{Path(path).name} linha {line}: 'id' vazio.")
         if key in table:
-            raise StatsError(f"{where} linha {line}: id duplicado '{key}'.")
-        table[key] = cls(**values)
+            raise StatsError(f"{Path(path).name} linha {line}: id duplicado '{key}'.")
+        table[key] = obj
     return table
+
+
+def _check_waves(rows: list[tuple[int, WaveRow]], zombies: dict[str, ZombieSpec]) -> list[WaveRow]:
+    final_turns = set()
+    for line, w in rows:
+        where = f"waves.csv linha {line}"
+        if not 1 <= w.turn <= MAX_TURNS:
+            raise StatsError(f"{where}, coluna 'turn': deve estar entre 1 e {MAX_TURNS}.")
+        if w.kind not in zombies:
+            raise StatsError(f"{where}, coluna 'kind': tipo '{w.kind}' não existe em zombies.csv.")
+        if direction_token(w.direction) is None:
+            raise StatsError(f"{where}, coluna 'direction': use N, S, L, O, ? ou ?1, ?2...")
+        if w.final:
+            final_turns.add(w.turn)
+    if len(final_turns) > 1:
+        raise StatsError(f"waves.csv: a horda final (final=1) deve ter um único turno; "
+                         f"encontrados {sorted(final_turns)}.")
+    return sorted((w for _, w in rows), key=lambda w: w.turn)
 
 
 @dataclass(frozen=True)
@@ -200,6 +254,7 @@ class GameStats:
     buildings: dict[str, BuildingStats]
     units: dict[str, UnitStats]
     zombies: dict[str, ZombieSpec]
+    waves: list[WaveRow]
 
 
 def _check_ids(where: str, table: dict, required: set[str], exact: bool) -> None:
@@ -220,22 +275,23 @@ def load_stats(folder: Path = DATA_DIR) -> GameStats:
     _check_ids("buildings.csv", buildings, REQUIRED_BUILDINGS, exact=True)
     _check_ids("units.csv", units, REQUIRED_UNITS, exact=True)
     _check_ids("zombies.csv", zombies, REQUIRED_ZOMBIES, exact=False)
-    referenced = {k for groups in WAVES.values() for k, _, _ in groups}
-    referenced |= {k for k, _, _ in FINAL_HORDE} | {k for k, _ in START_SWARM_TYPES}
-    unknown = referenced - set(zombies)
+    unknown = {k for k, _ in START_SWARM_TYPES} - set(zombies)
     if unknown:
-        raise StatsError(f"zombies.csv: tipos usados nas ondas (config.py) não definidos: "
-                         f"{', '.join(sorted(unknown))}.")
+        raise StatsError(f"zombies.csv: tipos usados em START_SWARM_TYPES (config.py) não "
+                         f"definidos: {', '.join(sorted(unknown))}.")
+    waves = _check_waves(read_rows(folder / "waves.csv", WaveRow), zombies)
     for kind in ("hq", "infected"):
         if buildings[kind].buildable:
             raise StatsError(f"buildings.csv: '{kind}' não pode ter buildable=1.")
-    return GameStats(buildings, units, zombies)
+    return GameStats(buildings, units, zombies, waves)
 
 
 STATS = load_stats()
 BUILDING_STATS: dict[str, BuildingStats] = STATS.buildings
 UNIT_SPECS: dict[str, UnitStats] = STATS.units
 ZOMBIE_SPECS: dict[str, ZombieSpec] = STATS.zombies
+# cronograma de ondas (ordenado por turno); direções "?" são sorteadas no início da partida
+WAVE_SCHEDULE: list[WaveRow] = STATS.waves
 # construções que o jogador pode erguer (botões/atalhos)
 BUILD_SPECS: dict[str, BuildingStats] = {k: v for k, v in BUILDING_STATS.items() if v.buildable}
 VISION_RADIUS: dict[str, int] = {**{k: v.vision for k, v in BUILDING_STATS.items()},

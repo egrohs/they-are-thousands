@@ -35,7 +35,7 @@ class StatsFilesTest(unittest.TestCase):
 class StatsParsingTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
-        for name in ("buildings.csv", "units.csv", "zombies.csv"):
+        for name in ("buildings.csv", "units.csv", "zombies.csv", "waves.csv"):
             shutil.copy(DATA_DIR / name, self.tmp / name)
 
     def tearDown(self):
@@ -56,7 +56,7 @@ class StatsParsingTest(unittest.TestCase):
         rows = [lines[0].replace(",", ";")]
         rows += ["walker;Errante;Z;1;2;0,5;10;1;1;0;0;#692424;Comum"]
         (self.tmp / "zombies.csv").write_text("\n".join(rows) + "\n", encoding="utf-8")
-        with self.assertRaises(StatsError) as ctx:  # ondas usam tipos que não existem mais
+        with self.assertRaises(StatsError) as ctx:  # START_SWARM_TYPES usa tipos removidos
             load_stats(self.tmp)
         self.assertIn("runner", str(ctx.exception))
         rows += [f"{k};X;X;1;2;0,75;5;1;1;sim;0;#000000;" for k in
@@ -102,6 +102,31 @@ class StatsParsingTest(unittest.TestCase):
         stats = load_stats(self.tmp)
         self.assertEqual(stats.zombies["tank"].hp, 5)
         self.assertEqual(stats.zombies["tank"].color, (0x33, 0x44, 0x55))
+
+    def test_wave_schedule_loads(self):
+        stats = load_stats(self.tmp)
+        self.assertTrue(stats.waves)
+        self.assertEqual([w.turn for w in stats.waves], sorted(w.turn for w in stats.waves))
+        self.assertEqual(len({w.turn for w in stats.waves if w.final}), 1)
+
+    def test_wave_with_unknown_kind_or_direction(self):
+        with (self.tmp / "waves.csv").open("a", encoding="utf-8") as f:
+            f.write("5,N,dragon,1,3,0,\n")
+        with self.assertRaisesRegex(StatsError, "waves.csv linha .*dragon"):
+            load_stats(self.tmp)
+        self._edit("waves.csv", "5,N,dragon", "5,NE,walker")
+        with self.assertRaisesRegex(StatsError, "direction"):
+            load_stats(self.tmp)
+
+    def test_fixed_direction_is_respected(self):
+        (self.tmp / "waves.csv").write_text(
+            "turn,direction,kind,swarms,size,final\n4,L,walker,2,3,0\n", encoding="utf-8")
+        stats = load_stats(self.tmp)
+        from game.world import World
+        world = World(seed=5)
+        plan = world._plan_waves(stats.waves)
+        self.assertEqual(plan[0].entry_points[0][0], 3)
+        self.assertEqual(plan[0].entry_points[0][1][0], world.grid.width - 1)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,16 @@
+turn,direction,kind,swarms,size,final,notes
+3,?,walker,2,4,0,Primeira onda: um grupo pequeno
+6,?,walker,2,4,0,
+6,?,runner,1,4,0,
+9,?,walker,2,5,0,
+9,?,brute,1,2,0,
+9,?,harpy,1,3,0,
+9,?,venom,1,2,0,
+12,?1,walker,2,8,1,Horda final: duas direcoes ao mesmo tempo
+12,?1,runner,1,6,1,
+12,?1,brute,1,3,1,
+12,?1,harpy,1,4,1,
+12,?2,walker,2,8,1,
+12,?2,runner,1,6,1,
+12,?2,brute,1,3,1,
+12,?2,venom,1,4,1,

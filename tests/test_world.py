@@ -107,9 +107,49 @@ class ZombieTypeTests(unittest.TestCase):
         self.assertFalse(walker.aggressive)
 
     def test_waves_spawn_typed_swarms(self):
-        spawned = self.world._spawn_wave([("harpy", 1, 3), ("brute", 2, 2)])
+        from game.world import PlannedWave, WaveGroup
+        wave = PlannedWave(5, False, [WaveGroup(0, (12, 0), "harpy", 1, 3),
+                                      WaveGroup(0, (12, 0), "brute", 2, 2)])
+        spawned = self.world._spawn_wave(wave)
         self.assertEqual(spawned, {"harpy": 1, "brute": 2})
+        self.assertTrue(wave.spawned)
         self.assertEqual({s.kind for s in self.world.grid.swarms()}, {"harpy", "brute"})
+        # todos entram pela borda norte, perto do ponto anunciado
+        for s in self.world.grid.swarms():
+            self.assertLess(s.pos[1], 2)
+            self.assertLessEqual(abs(s.pos[0] - 12), 4)
+
+    def test_wave_plan_is_announced_and_deterministic(self):
+        plan = self.world.waves
+        self.assertTrue(plan)
+        for wave in plan:
+            for side, anchor in wave.entry_points:
+                if side == 0:
+                    self.assertEqual(anchor[1], 0)
+                elif side == 1:
+                    self.assertEqual(anchor[1], self.world.grid.height - 1)
+                elif side == 2:
+                    self.assertEqual(anchor[0], 0)
+                else:
+                    self.assertEqual(anchor[0], self.world.grid.width - 1)
+        normal = [w for w in plan if not w.final]
+        self.assertTrue(all(len(w.entry_points) == 1 for w in normal))
+        again = World(seed=self.world.seed).waves
+        self.assertEqual([(w.turn, w.entry_points) for w in plan],
+                         [(w.turn, w.entry_points) for w in again])
+
+    def test_scheduled_wave_spawns_at_announced_edge(self):
+        world = self.world
+        clear_swarms(world)
+        wave = world.next_wave
+        world.turn = wave.turn
+        world.end_round()
+        self.assertTrue(wave.spawned)
+        sides = {side for side, _ in wave.entry_points}
+        for s in world.grid.swarms():
+            on_edge = {0: s.pos[1] < 2, 1: s.pos[1] >= world.grid.height - 2,
+                       2: s.pos[0] < 2, 3: s.pos[0] >= world.grid.width - 2}
+            self.assertTrue(any(on_edge[d] for d in sides), s.pos)
 
 
 class WorldTests(unittest.TestCase):

@@ -74,17 +74,10 @@ GATHER_NOISE = 2
 START_RESOURCES = {"gold": 10, "wood": 12, "stone": 4}
 RESOURCE_LABELS = {"gold": "Ouro", "wood": "Madeira", "stone": "Pedra"}
 
-# fim do turno N -> lista de (tipo de zumbi, quantidade de enxames, tamanho)
-WAVES: dict[int, list[tuple[str, int, int]]] = {
-    2: [("walker", 2, 4)],
-    4: [("walker", 2, 5), ("runner", 1, 4)],
-    6: [("walker", 2, 6), ("brute", 1, 2), ("harpy", 1, 3)],
-    8: [("walker", 2, 6), ("runner", 1, 5), ("venom", 1, 3), ("brute", 1, 3)],
-}
-FINAL_HORDE_TURN = 9
-FINAL_HORDE: list[tuple[str, int, int]] = [
-    ("walker", 4, 9), ("runner", 2, 7), ("brute", 2, 3), ("harpy", 1, 4), ("venom", 1, 4),
-]
+# ondas programadas: cronograma em data/waves.csv
+WAVE_EDGE_SPREAD = 4    # ponto de entrada da onda: ±N tiles ao longo da borda anunciada
+WAVE_EDGE_DEPTH = 2     # profundidade (tiles a partir da borda) usada para posicionar enxames
+WAVE_WARNING_TURNS = 3  # o indicador no mapa aparece a partir de N turnos antes
 # tipos dos enxames iniciais espalhados pelo mapa (sorteio ponderado)
 START_SWARM_TYPES = (("walker", 4), ("runner", 1))
 
@@ -148,4 +141,5 @@ COLORS: dict[str, tuple[int, int, int]] = {
     "hp_low": (230, 90, 50),
     "victory": (110, 230, 120),
     "defeat": (240, 70, 60),
+    "wave_warning": (255, 110, 70),
 }

@@ -8,17 +8,18 @@ import random
 from dataclasses import dataclass
 from typing import Optional
 
-from .config import (AGGRO_DISTANCE, AP_PER_TURN, ATTACK_AP, FINAL_HORDE, FINAL_HORDE_TURN,
+from .config import (AGGRO_DISTANCE, AP_PER_TURN, ATTACK_AP,
                      FOREST_MOVE_COST, FOW_ENABLED_DEFAULT, GATHER_AMOUNT,
                      GATHER_AP, GATHER_NOISE, GRID_H, GRID_W, MAX_TURNS,
                      NOISE_MEMORY_TURNS, REPAIR_AMOUNT, REPAIR_AP, REPAIR_NOISE, REPAIR_WOOD,
                      RESOURCE_LABELS, START_RESOURCES, START_SWARM_TYPES, WALL_BASH_COST,
-                     WANDER_CHANCE, WAVES)
+                     WANDER_CHANCE, WAVE_EDGE_DEPTH, WAVE_EDGE_SPREAD)
 from .entities import (BUILDING_TYPES, Building, CommandCenter, Entity, InfectedHouse,
                        Ranger, Soldier, Tent, Unit, ZombieSwarm)
 from .fog import FogOfWar
 from .grid import INF, Grid, Pos, Terrain
-from .stats import BUILD_SPECS, BUILDING_STATS, ZOMBIE_SPECS
+from .stats import (BUILD_SPECS, BUILDING_STATS, DIRECTION_NAMES, WAVE_SCHEDULE, ZOMBIE_SPECS,
+                    WaveRow, direction_token)
 
 MAX_LOG = 80
 
@@ -35,6 +36,49 @@ class Effect:
     start: Pos
     end: Pos
     color_key: str
+
+
+@dataclass(frozen=True)
+class WaveGroup:
+    side: int      # 0 = norte, 1 = sul, 2 = oeste, 3 = leste
+    anchor: Pos    # tile da borda em torno do qual os enxames entram
+    kind: str
+    swarms: int
+    size: int
+
+    @property
+    def direction(self) -> str:
+        return DIRECTION_NAMES[self.side]
+
+
+@dataclass
+class PlannedWave:
+    turn: int
+    final: bool
+    groups: list[WaveGroup]
+    spawned: bool = False
+
+    @property
+    def zombies(self) -> int:
+        return sum(g.swarms * min(g.size, ZOMBIE_SPECS[g.kind].max_stack) for g in self.groups)
+
+    @property
+    def entry_points(self) -> list[tuple[int, Pos]]:
+        """(lado, âncora) distintos da onda, na ordem do CSV."""
+        seen: list[tuple[int, Pos]] = []
+        for g in self.groups:
+            if (g.side, g.anchor) not in seen:
+                seen.append((g.side, g.anchor))
+        return seen
+
+    @property
+    def directions(self) -> str:
+        return " e ".join(DIRECTION_NAMES[side] for side, _ in self.entry_points)
+
+
+def edge_pos(side: int, along: int, depth: int = 0) -> Pos:
+    return {0: (along, depth), 1: (along, GRID_H - 1 - depth),
+            2: (depth, along), 3: (GRID_W - 1 - depth, along)}[side]
 
 
 class World:
@@ -64,11 +108,13 @@ class World:
         self.zombies_killed = 0
         if map_data is None:
             self._generate_map()
+        self.waves = self._plan_waves(WAVE_SCHEDULE)
         self.begin_player_phase()
         if self.map_name:
             self.message(f"Mapa: {self.map_name}. Sobreviva {MAX_TURNS} turnos!")
         else:
             self.message(f"Semente do mapa: {self.seed}. Sobreviva {MAX_TURNS} turnos!")
+        self._announce_next_wave()
 
     # ======================================================================
     # Utilidades
@@ -619,20 +665,85 @@ class World:
                 remaining -= swarm.count
         return amount - remaining
 
-    def _spawn_wave(self, groups: list[tuple[str, int, int]]) -> dict[str, int]:
-        spawned: dict[str, int] = {}
-        i = self.rng.randrange(4)
-        for kind, swarms, size in groups:
-            for _ in range(swarms):
-                side = i % 4
-                i += 1
-                for _ in range(60):
-                    k = self.rng.randrange(GRID_W if side in (0, 1) else GRID_H)
-                    pos = {0: (k, 0), 1: (k, GRID_H - 1), 2: (0, k), 3: (GRID_W - 1, k)}[side]
+    # ======================================================================
+    # Ondas programadas
+    # ======================================================================
+    def _plan_waves(self, schedule: list[WaveRow]) -> list[PlannedWave]:
+        """Resolve direções sorteadas ("?") e pontos de entrada já no início da partida,
+        para que o jogador veja de onde cada onda virá."""
+        rng = random.Random(self.seed * 1_000_003 + 7)  # não altera a sequência do mapa/IA
+        by_turn: dict[int, list[WaveRow]] = {}
+        for row in schedule:
+            by_turn.setdefault(row.turn, []).append(row)
+        plan: list[PlannedWave] = []
+        last_sides: list[int] = []
+        for turn in sorted(by_turn):
+            rows = by_turn[turn]
+            fixed = {direction_token(r.direction) for r in rows}
+            sides: dict[object, int] = {t: t for t in fixed if isinstance(t, int)}
+            for token in sorted(t for t in fixed if isinstance(t, str)):
+                options = [d for d in range(4) if d not in sides.values()] or list(range(4))
+                fresh = [d for d in options if d not in last_sides] or options  # varia a borda
+                sides[token] = rng.choice(fresh)
+            anchors: dict[int, Pos] = {}
+            for side in sorted(set(sides.values())):
+                length = GRID_W if side in (0, 1) else GRID_H
+                lo, hi = WAVE_EDGE_SPREAD, max(WAVE_EDGE_SPREAD, length - 1 - WAVE_EDGE_SPREAD)
+                anchors[side] = edge_pos(side, rng.randint(lo, hi))
+            groups = []
+            for r in rows:
+                side = sides[direction_token(r.direction)]
+                groups.append(WaveGroup(side, anchors[side], r.kind, r.swarms, r.size))
+            plan.append(PlannedWave(turn, any(r.final for r in rows), groups))
+            last_sides = sorted(set(sides.values()))
+        return plan
+
+    @property
+    def next_wave(self) -> Optional[PlannedWave]:
+        return next((w for w in self.waves if not w.spawned and w.turn >= self.turn), None)
+
+    @property
+    def final_wave(self) -> Optional[PlannedWave]:
+        return next((w for w in self.waves if w.final), None)
+
+    def _announce_next_wave(self) -> None:
+        wave = self.next_wave
+        if wave is None:
+            return
+        left = wave.turn - self.turn
+        when = "ao fim deste turno" if left == 0 else f"em {left} turno(s)"
+        label = "HORDA FINAL" if wave.final else "Próxima onda"
+        self.message(f"{label}: ~{wave.zombies} zumbis pelo {wave.directions} {when}.")
+
+    def _wave_spawn_cells(self, group: WaveGroup) -> list[Pos]:
+        side = group.side
+        along0 = group.anchor[0] if side in (0, 1) else group.anchor[1]
+        length = GRID_W if side in (0, 1) else GRID_H
+        for spread in (WAVE_EDGE_SPREAD, length):  # se a entrada estiver bloqueada, usa a borda toda
+            cells = []
+            for depth in range(WAVE_EDGE_DEPTH):
+                for along in range(max(0, along0 - spread), min(length, along0 + spread + 1)):
+                    pos = edge_pos(side, along, depth)
                     if self.grid.is_free(pos):
-                        self.grid.place_swarm(ZombieSwarm(pos, size, aggressive=True, kind=kind))
-                        spawned[kind] = spawned.get(kind, 0) + 1
-                        break
+                        cells.append((depth, abs(along - along0), self.rng.random(), pos))
+            if cells:
+                return [c[3] for c in sorted(cells)]
+        return []
+
+    def _spawn_group(self, group: WaveGroup) -> int:
+        placed = 0
+        for pos in self._wave_spawn_cells(group)[: group.swarms]:
+            self.grid.place_swarm(ZombieSwarm(pos, group.size, aggressive=True, kind=group.kind))
+            placed += 1
+        return placed
+
+    def _spawn_wave(self, wave: PlannedWave) -> dict[str, int]:
+        spawned: dict[str, int] = {}
+        for group in wave.groups:
+            n = self._spawn_group(group)
+            if n:
+                spawned[group.kind] = spawned.get(group.kind, 0) + n
+        wave.spawned = True
         return spawned
 
     @staticmethod
@@ -649,13 +760,17 @@ class World:
                 s.noise_turns -= 1
                 if s.noise_turns == 0:
                     s.noise_target = None
-        if self.turn in WAVES:
-            spawned = self._spawn_wave(WAVES[self.turn])
-            self.message(f"Onda nas bordas: {self._describe_wave(spawned)}!")
-        if self.turn == FINAL_HORDE_TURN:
-            spawned = self._spawn_wave(FINAL_HORDE)
-            self.final_horde_spawned = True
-            self.message(f"A HORDA FINAL chegou: {self._describe_wave(spawned)}!")
+        arrived = False
+        for wave in self.waves:
+            if wave.turn == self.turn and not wave.spawned:
+                arrived = True
+                spawned = self._spawn_wave(wave)
+                if wave.final:
+                    self.final_horde_spawned = True
+                    self.message(f"A HORDA FINAL chegou pelo {wave.directions}: "
+                                 f"{self._describe_wave(spawned)}!")
+                else:
+                    self.message(f"Onda pelo {wave.directions}: {self._describe_wave(spawned)}!")
 
         if self.check_defeat():
             return
@@ -665,6 +780,9 @@ class World:
             self._finish(True, "Vitória! A horda final foi repelida.")
         else:
             self.turn += 1
+            nxt = self.next_wave
+            if nxt is not None and (arrived or nxt.turn == self.turn):
+                self._announce_next_wave()
 
     def check_defeat(self) -> bool:
         if not self.game_over and not self.hq.alive:

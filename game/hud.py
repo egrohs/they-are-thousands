@@ -6,7 +6,7 @@ from typing import Optional
 
 import pygame
 
-from .config import (COLORS, FINAL_HORDE_TURN, MAX_TURNS, REPAIR_AMOUNT, REPAIR_AP,
+from .config import (COLORS, MAX_TURNS, REPAIR_AMOUNT, REPAIR_AP,
                      REPAIR_WOOD,                      RESOURCE_LABELS)
 from .grid import Pos
 from .renderer import UIState
@@ -42,6 +42,16 @@ class Button:
             surface.blit(sub, (self.rect.x + 8, self.rect.bottom - sub.get_height() - 4))
         else:
             surface.blit(label, label.get_rect(center=self.rect.center))
+
+
+def wave_status(world: World) -> str:
+    wave = world.next_wave
+    if wave is None:
+        return "Sem novas ondas programadas"
+    left = wave.turn - world.turn
+    when = "neste turno!" if left == 0 else f"em {left} turno(s)"
+    label = "HORDA FINAL" if wave.final else "Onda"
+    return f"{label}: {wave.directions} ~{wave.zombies} - {when}"
 
 
 def _name(kind: str) -> str:
@@ -126,16 +136,19 @@ class HUD:
             col += img.get_width() + 14
         y = res_y + 22
         y = self._line(surface, f"AP: {world.ap}", (x, y), 26, COLORS["ap"])
-        if world.final_horde_spawned:
-            horde = "Horda final em campo!"
-        else:
-            left = FINAL_HORDE_TURN - world.turn
-            horde = f"Horda final em {left} turno(s)" if left > 0 else "Horda final ao fim deste turno!"
         if world.fog.enabled:
             zombies = f"Zumbis à vista: {world.visible_zombies}"
         else:
             zombies = f"Zumbis: {world.total_zombies}"
-        self._line(surface, f"{zombies}   {horde}", (x, y), 19, COLORS["defeat"])
+        final = world.final_wave
+        if world.final_horde_spawned:
+            horde = "Horda final em campo!"
+        elif final is not None:
+            horde = f"Horda final: turno {final.turn}"
+        else:
+            horde = ""
+        y = self._line(surface, f"{zombies}   {horde}", (x, y), 19, COLORS["defeat"])
+        self._line(surface, wave_status(world), (x, y), 19, COLORS["wave_warning"])
 
         enabled = turns.is_player_phase and not world.game_over
         for b in self.buttons:
