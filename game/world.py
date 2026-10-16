@@ -8,16 +8,17 @@ import random
 from dataclasses import dataclass
 from typing import Optional
 
-from .config import (AGGRO_DISTANCE, AP_PER_TURN, ATTACK_AP, BALLISTA_NOISE, BUILD_SPECS,
-                     FOW_ENABLED_DEFAULT, HQ_BUILD_RADIUS, TESLA_BUILD_RADIUS, FINAL_HORDE, FINAL_HORDE_TURN, FOREST_MOVE_COST, GATHER_AMOUNT,
-                     GATHER_AP, GATHER_NOISE, GRID_H, GRID_W, INFECTED_SPAWN, MAX_TURNS,
+from .config import (AGGRO_DISTANCE, AP_PER_TURN, ATTACK_AP, FINAL_HORDE, FINAL_HORDE_TURN,
+                     FOREST_MOVE_COST, FOW_ENABLED_DEFAULT, GATHER_AMOUNT,
+                     GATHER_AP, GATHER_NOISE, GRID_H, GRID_W, MAX_TURNS,
                      NOISE_MEMORY_TURNS, REPAIR_AMOUNT, REPAIR_AP, REPAIR_NOISE, REPAIR_WOOD,
                      RESOURCE_LABELS, START_RESOURCES, START_SWARM_TYPES, WALL_BASH_COST,
-                     WANDER_CHANCE, WAVES, ZOMBIE_SPECS)
-from .entities import (BUILDING_TYPES, Ballista, Building, CommandCenter, Entity, InfectedHouse,
+                     WANDER_CHANCE, WAVES)
+from .entities import (BUILDING_TYPES, Building, CommandCenter, Entity, InfectedHouse,
                        Ranger, Soldier, Tent, Unit, ZombieSwarm)
 from .fog import FogOfWar
 from .grid import INF, Grid, Pos, Terrain
+from .stats import BUILD_SPECS, BUILDING_STATS, ZOMBIE_SPECS
 
 MAX_LOG = 80
 
@@ -194,8 +195,8 @@ class World:
         if tile.occupied:
             return False, "Tile ocupado."
         if not self.in_build_range(pos, zone):
-            return False, (f"Fora do território (raio {HQ_BUILD_RADIUS} do CC / "
-                           f"{TESLA_BUILD_RADIUS} de Tesla). Construa uma Tesla para expandir.")
+            return False, (f"Fora do território (raio {BUILDING_STATS['hq'].build_radius} do CC / "
+                           f"{BUILDING_STATS['tesla'].build_radius} de Tesla). Construa uma Tesla para expandir.")
         if self.ap < spec.ap:
             return False, f"AP insuficiente ({spec.ap} necessário)."
         missing = self._missing_resources(spec.cost)
@@ -526,8 +527,10 @@ class World:
 
     def ballistas_fire(self) -> None:
         self.update_fog()
+        # qualquer construção com alcance e dano no CSV dispara (hoje: a Balista)
         ballistas = sorted((b for b in self.grid.buildings()
-                            if isinstance(b, Ballista) and b.alive), key=lambda b: b.pos)
+                            if b.alive and not b.hostile and b.attack_range > 0 and b.damage > 0),
+                           key=lambda b: b.pos)
         for b in ballistas:
             in_range = [s for s in self.grid.swarms()
                         if Grid.chebyshev(b.pos, s.pos) <= b.attack_range
@@ -538,8 +541,8 @@ class World:
             killed = target.kill(b.damage)
             self.zombies_killed += killed
             self.effects.append(Effect(b.pos, target.pos, "bolt"))
-            self.emit_noise(b.pos, BALLISTA_NOISE, b.name)
-            self.message(f"Balista em {b.pos} abateu {killed} {target.name}(s).")
+            self.emit_noise(b.pos, b.stats.attack_noise, b.name)
+            self.message(f"{b.name} em {b.pos} abateu {killed} {target.name}(s).")
             if not target.alive:
                 self.grid.remove_swarm(target)
 
@@ -595,7 +598,7 @@ class World:
                 self.grid.place_building(InfectedHouse(b.pos))
                 self.message(f"Tenda em {b.pos} virou Casa Infectada!")
         for house in self.infected_houses():
-            spawned = self._spawn_near(house.pos, INFECTED_SPAWN)
+            spawned = self._spawn_near(house.pos, house.stats.spawn)
             if spawned:
                 self.message(f"Casa Infectada em {house.pos} gerou {spawned} zumbi(s).")
 

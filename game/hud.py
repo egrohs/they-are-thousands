@@ -6,10 +6,11 @@ from typing import Optional
 
 import pygame
 
-from .config import (BUILD_SPECS, COLORS, FINAL_HORDE_TURN, MAX_TURNS, REPAIR_AP, REPAIR_WOOD,
-                     RESOURCE_LABELS, TESLA_BUILD_RADIUS)
+from .config import (COLORS, FINAL_HORDE_TURN, MAX_TURNS, REPAIR_AMOUNT, REPAIR_AP,
+                     REPAIR_WOOD,                      RESOURCE_LABELS)
 from .grid import Pos
 from .renderer import UIState
+from .stats import BUILDING_STATS
 from .turns import TurnManager
 from .world import World
 
@@ -43,8 +44,12 @@ class Button:
             surface.blit(label, label.get_rect(center=self.rect.center))
 
 
+def _name(kind: str) -> str:
+    return BUILDING_STATS[kind].name
+
+
 def _cost_text(kind: str) -> str:
-    spec = BUILD_SPECS[kind]
+    spec = BUILDING_STATS[kind]
     parts = [f"{spec.ap} AP"]
     parts += [f"{v} {RESOURCE_LABELS[k][:2]}" for k, v in spec.cost.items() if v]
     return " | ".join(parts) + f" | HP {spec.hp}"
@@ -73,13 +78,13 @@ class HUD:
         half = (w - 8) // 2
         y = 168
         self.buttons: list[Button] = [
-            Button(pygame.Rect(x, y, half, 44), "[1] Muro", "wall", _cost_text("wall")),
-            Button(pygame.Rect(x + half + 8, y, half, 44), "[2] Tenda", "tent", _cost_text("tent")),
-            Button(pygame.Rect(x, y + 50, half, 44), "[3] Balista", "ballista", _cost_text("ballista")),
+            Button(pygame.Rect(x, y, half, 44), f"[1] {_name('wall')}", "wall", _cost_text("wall")),
+            Button(pygame.Rect(x + half + 8, y, half, 44), f"[2] {_name('tent')}", "tent", _cost_text("tent")),
+            Button(pygame.Rect(x, y + 50, half, 44), f"[3] {_name('ballista')}", "ballista", _cost_text("ballista")),
             Button(pygame.Rect(x + half + 8, y + 50, half, 44), "[4] Reparar", "repair",
-                   f"{REPAIR_AP} AP | {REPAIR_WOOD} Ma | +5 HP"),
-            Button(pygame.Rect(x, y + 100, w, 44), "[5] Tesla (expande território)", "tesla",
-                   _cost_text("tesla") + f" | raio {TESLA_BUILD_RADIUS}"),
+                   f"{REPAIR_AP} AP | {REPAIR_WOOD} Ma | +{REPAIR_AMOUNT} HP"),
+            Button(pygame.Rect(x, y + 100, w, 44), f"[5] {_name('tesla')} (expande território)", "tesla",
+                   _cost_text("tesla") + f" | raio {BUILDING_STATS['tesla'].build_radius}"),
             Button(pygame.Rect(x, y + 152, w, 38), "Encerrar Turno  [Espaço]", "end_turn"),
         ]
         self.info_top = y + 202

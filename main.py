@@ -2,10 +2,16 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
-from game.app import GameApp
-from game.maps import MapError, load_map
+try:
+    from game.app import GameApp
+    from game.maps import MapError, load_map
+except ValueError as exc:  # StatsError: CSV de balanceamento inválido em data/
+    if type(exc).__name__ != "StatsError":
+        raise
+    sys.exit(f"Erro nos dados de balanceamento (data/*.csv):\n  {exc}")
 
 
 def main() -> None:

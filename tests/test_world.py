@@ -3,7 +3,8 @@ import unittest
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
-from game.config import AP_PER_TURN, BUILD_SPECS, MAX_TURNS
+from game.config import AP_PER_TURN, MAX_TURNS
+from game.stats import BUILD_SPECS
 from game.entities import InfectedHouse, Ranger, Soldier, Tent, Wall, ZombieSwarm
 from game.grid import Grid, Terrain
 from game.turns import Phase, TurnManager

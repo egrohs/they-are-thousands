@@ -18,10 +18,11 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .config import GRID_H, GRID_W, MAPS_DIR, ZOMBIE_SPECS
+from .config import GRID_H, GRID_W, MAPS_DIR
 from .entities import (BUILDING_TYPES, Building, CommandCenter, InfectedHouse, Ranger, Soldier,
                        Unit, ZombieSwarm)
 from .grid import Grid, Pos, Terrain
+from .stats import ZOMBIE_SPECS
 
 MAP_VERSION = 1
 TERRAIN_CHARS = {Terrain.GRASS: "G", Terrain.FOREST: "F", Terrain.ROCK: "R", Terrain.WATER: "W"}

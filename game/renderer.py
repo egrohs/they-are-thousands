@@ -7,11 +7,11 @@ from typing import Optional
 
 import pygame
 
-from .config import (BUILD_SPECS, COLORS, EXHAUSTED_TINT, INFECTED_TINT, TILE_SIZE,
-                     ZOMBIE_TINTS)
+from .config import COLORS, EXHAUSTED_TINT, INFECTED_TINT, TILE_SIZE, ZOMBIE_TINTS
 from .entities import Building, Unit, ZombieSwarm
 from .grid import Pos, Terrain
 from .sprites import SpriteManager
+from .stats import BUILD_SPECS
 from .world import World
 
 
@@ -338,12 +338,12 @@ class Renderer:
             pygame.draw.circle(surface, (0, 0, 0), badge, r, 1)
             self._text(surface, str(s.count), badge, r * 1.7)
             tag = pygame.Rect(dest.x + 2, dest.y + 2, r * 2, r * 2)
-            pygame.draw.rect(surface, COLORS[f"zombie_{s.kind}"], tag, border_radius=3)
+            pygame.draw.rect(surface, s.spec.color, tag, border_radius=3)
             pygame.draw.rect(surface, (0, 0, 0), tag, 1, border_radius=3)
             self._text(surface, s.spec.symbol, tag.center, r * 1.7)
             return
         inner = rect.inflate(-max(2, int(ts * 0.14)), -max(2, int(ts * 0.14)))
-        pygame.draw.rect(surface, COLORS[f"zombie_{s.kind}"], inner)
+        pygame.draw.rect(surface, s.spec.color, inner)
         if s.aggressive and s.noise_target is None:
             border = COLORS["zombie_aggr"]
         pygame.draw.rect(surface, border, inner, 2)

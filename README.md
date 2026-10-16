@@ -60,7 +60,7 @@ e reescaladas conforme o zoom:
 - Sem imagem (Soldado, CC, Muro, Balista, Tesla) ou arquivo ausente → placeholder geométrico.
 
 ## Tipos de zumbi
-Inspirados em *They Are Billions* (atributos em `ZOMBIE_SPECS` no `config.py`). Cada tile guarda
+Inspirados em *They Are Billions* (atributos em `data/zombies.csv`). Cada tile guarda
 uma pilha de um único tipo; pilhas de tipos diferentes não se fundem.
 
 | Tipo | Letra | HP cada | Vel. | Pilha máx. | Habilidade |
@@ -97,8 +97,29 @@ Construa Teslas na borda para avançar; se uma Tesla cair, o território dela so
 5. **Ataque/Infecção** – enxames atacam vizinhos (Cuspidores à distância); Tenda com HP 0 vira Casa Infectada que gera zumbis.
 6. **Fim de rodada** – produção de ouro, ondas nas bordas, checagem de vitória.
 
+## Balanceamento (CSV)
+Os stats ficam em `data/` (um arquivo por categoria, uma linha por tipo, `id` como chave).
+Edite no Excel/LibreOffice ou num editor de texto e **reinicie o jogo** para aplicar.
+
+| Arquivo | Colunas principais |
+|---|---|
+| `data/buildings.csv` | `buildable` (aparece nos botões), custo `ap/gold/wood/stone`, `hp`, `noise` (ao construir), `gold_income`, `vision`, `build_radius` (território), `attack_range`/`damage`/`attack_noise` (defesa automática), `spawn` (Casa Infectada) |
+| `data/units.csv` | `hp`, `move`, `attack_range`, `damage`, `noise` (ao atacar), `vision` |
+| `data/zombies.csv` | `hp` (por zumbi), `speed`, `attack` (dano por zumbi), `max_stack` (≤ 10), `attack_range`, `structure_mult`, `flying`, `hearing`, `color` (`#rrggbb`), `description` |
+
+- Separador `,` ou `;` (detectado automaticamente); com `;` aceita vírgula decimal (Excel pt-BR).
+- Booleanos: `0/1`, `true/false`, `sim/nao`. Coluna `notes` é livre. Linhas com `id` iniciado por `#` são ignoradas.
+- Erros (coluna ausente, valor inválido, id faltando/duplicado) abortam com arquivo, linha e coluna.
+- Construções/unidades têm ids fixos (`hq, tent, wall, ballista, tesla, infected` / `soldier, ranger`).
+  Novos **tipos de zumbi** podem ser criados só no CSV (usam o visual geométrico com a `color`);
+  para aparecerem nas ondas, adicione-os em `WAVES`/`FINAL_HORDE` no `config.py`.
+- Qualquer construção com `attack_range` e `damage` > 0 dispara na fase de defesa.
+- Regras gerais (AP por turno, ondas, recursos iniciais, reparo/coleta) continuam em `game/config.py`.
+
 ## Estrutura
-- `game/config.py` – balanceamento, custos, cores
+- `data/*.csv` – stats de construções, unidades e zumbis (balanceamento)
+- `game/stats.py` – leitura/validação dos CSVs
+- `game/config.py` – regras gerais, ondas, layout, cores
 - `game/grid.py` – `Grid`, `Tile`, `Terrain`, distâncias, BFS/Dijkstra
 - `game/entities.py` – `Building` (CC, Tenda, Muro, Balista, Tesla, Casa Infectada), `Unit` (Soldado, Ranger), `ZombieSwarm` (tipado)
 - `game/world.py` – regras e simulação (sem pygame)

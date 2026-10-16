@@ -6,8 +6,9 @@ from pathlib import Path
 
 import pygame
 
-from .config import (BUILD_SPECS, CAMERA_PAN_SPEED, COLORS, FOW_ENABLED_DEFAULT, FPS, GRID_H,
+from .config import (CAMERA_PAN_SPEED, COLORS, FOW_ENABLED_DEFAULT, FPS, GRID_H,
                      GRID_W, HUD_W, MUSIC_VOLUME_STEP, VIEW_H, VIEW_W, WINDOW_H, WINDOW_W)
+from .stats import BUILD_SPECS
 from .audio import MusicPlayer
 from .editor import EditorScreen
 from .grid import Pos

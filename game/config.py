@@ -1,7 +1,9 @@
-"""Constantes de balanceamento, layout e cores."""
+"""Constantes de regras gerais, layout e cores.
+
+Stats de construções, unidades e zumbis ficam nos CSVs de `data/` (ver `game/stats.py`).
+"""
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 
 # --- Áudio ------------------------------------------------------------------
@@ -11,6 +13,9 @@ MUSIC_EXTENSIONS = {".mp3", ".ogg", ".wav", ".flac"}
 MUSIC_VOLUME_DEFAULT = 0.5
 MUSIC_VOLUME_STEP = 0.1
 MUSIC_FADE_MS = 1500
+
+# --- Dados de balanceamento (CSV) -------------------------------------------
+DATA_DIR = ASSETS_DIR.parent / "data"
 
 # --- Mapas personalizados -----------------------------------------------------
 MAPS_DIR = ASSETS_DIR.parent / "maps"
@@ -49,18 +54,12 @@ CAMERA_PAN_SPEED = 600  # px/s
 # --- Regras gerais --------------------------------------------------------
 MAX_TURNS = 15
 AP_PER_TURN = 6
-HQ_BUILD_RADIUS = 4         # território (Chebyshev) ao redor do Centro de Comando
-TESLA_BUILD_RADIUS = 3      # território (Chebyshev) ao redor de cada Torre Tesla
 MAX_SWARM_SIZE = 10         # limite absoluto; cada tipo tem seu próprio `max_stack`
 AGGRO_DISTANCE = 7          # custo de caminho até alvo civil que desperta enxames ociosos
 WALL_BASH_COST = 6          # custo de "atravessar" um muro/balista no pathfinding
 FOREST_MOVE_COST = 2
 NOISE_MEMORY_TURNS = 2
 WANDER_CHANCE = 0.35
-INFECTED_HP = 6
-INFECTED_SPAWN = 2
-HQ_HP = 20
-HQ_GOLD_INCOME = 2
 
 REPAIR_AP = 1
 REPAIR_WOOD = 1
@@ -71,10 +70,6 @@ ATTACK_AP = 1
 GATHER_AP = 1
 GATHER_AMOUNT = 3
 GATHER_NOISE = 2
-
-BALLISTA_RANGE = 4
-BALLISTA_DAMAGE = 3
-BALLISTA_NOISE = 2
 
 START_RESOURCES = {"gold": 10, "wood": 12, "stone": 4}
 RESOURCE_LABELS = {"gold": "Ouro", "wood": "Madeira", "stone": "Pedra"}
@@ -96,88 +91,7 @@ START_SWARM_TYPES = (("walker", 4), ("runner", 1))
 PHASE_DELAY = 0.45  # segundos exibindo cada fase automática
 
 # --- Névoa de guerra --------------------------------------------------------
-FOW_ENABLED_DEFAULT = True
-VISION_RADIUS = {
-    "hq": 6,
-    "tesla": 4,
-    "ballista": 5,
-    "tent": 3,
-    "wall": 2,
-    "soldier": 4,
-    "ranger": 6,
-}
-
-
-@dataclass(frozen=True)
-class BuildSpec:
-    name: str
-    symbol: str
-    ap: int
-    gold: int
-    wood: int
-    stone: int
-    hp: int
-    noise: int
-    gold_income: int = 0
-
-    @property
-    def cost(self) -> dict[str, int]:
-        return {"gold": self.gold, "wood": self.wood, "stone": self.stone}
-
-
-@dataclass(frozen=True)
-class UnitSpec:
-    name: str
-    symbol: str
-    hp: int
-    move: int
-    attack_range: int
-    damage: int
-    noise: int
-
-
-@dataclass(frozen=True)
-class ZombieSpec:
-    """Atributos por tipo de zumbi (inspirados em They Are Billions)."""
-    name: str
-    symbol: str
-    hp: int                  # HP de cada zumbi da pilha
-    speed: int               # passos por turno quando agressivo
-    attack: float            # dano por zumbi (dano do enxame = ceil(qtd * attack))
-    max_stack: int           # zumbis por tile
-    attack_range: int = 1    # >1: ataque à distância (Manhattan)
-    structure_mult: float = 1.0   # multiplicador de dano contra construções
-    flying: bool = False     # salta por cima de muros/balistas/teslas
-    hearing: int = 0         # bônus no raio de barulho que o alerta
-    description: str = ""
-
-
-ZOMBIE_SPECS: dict[str, ZombieSpec] = {
-    "walker": ZombieSpec("Errante", "Z", hp=1, speed=2, attack=0.5, max_stack=10,
-                         description="Comum; forte em grandes pilhas."),
-    "runner": ZombieSpec("Corredor", "C", hp=1, speed=3, attack=0.5, max_stack=8, hearing=2,
-                         description="Rápido (3 passos) e ouve barulho de mais longe."),
-    "brute": ZombieSpec("Brutamontes", "B", hp=3, speed=1, attack=1.5, max_stack=4,
-                        structure_mult=2.0,
-                        description="Lento e resistente (3 HP cada); dano dobrado em construções."),
-    "harpy": ZombieSpec("Harpia", "H", hp=1, speed=3, attack=0.75, max_stack=5, flying=True,
-                        description="Salta por cima de muros, balistas e teslas."),
-    "venom": ZombieSpec("Cuspidor", "V", hp=2, speed=2, attack=0.75, max_stack=5,
-                        attack_range=2,
-                        description="Cospe ácido a 2 tiles de distância (2 HP cada)."),
-}
-
-BUILD_SPECS: dict[str, BuildSpec] = {
-    "wall": BuildSpec("Muro", "M", ap=1, gold=0, wood=2, stone=0, hp=10, noise=2),
-    "tent": BuildSpec("Tenda", "T", ap=2, gold=4, wood=4, stone=0, hp=6, noise=2, gold_income=3),
-    "ballista": BuildSpec("Balista", "B", ap=3, gold=6, wood=4, stone=3, hp=8, noise=4),
-    "tesla": BuildSpec("Tesla", "E", ap=1, gold=3, wood=2, stone=0, hp=4, noise=1),
-}
-
-UNIT_SPECS: dict[str, UnitSpec] = {
-    "soldier": UnitSpec("Soldado", "S", hp=7, move=3, attack_range=3, damage=4, noise=6),
-    "ranger": UnitSpec("Ranger", "R", hp=5, move=4, attack_range=4, damage=2, noise=1),
-}
+FOW_ENABLED_DEFAULT = True  # raios de visão: coluna `vision` dos CSVs
 
 COLORS: dict[str, tuple[int, int, int]] = {
     "bg": (16, 16, 20),
@@ -223,11 +137,6 @@ COLORS: dict[str, tuple[int, int, int]] = {
     "shot": (255, 240, 120),
     "bite": (255, 40, 40),
     "spit": (150, 230, 60),
-    "zombie_walker": (105, 36, 36),
-    "zombie_runner": (150, 60, 30),
-    "zombie_brute": (90, 70, 90),
-    "zombie_harpy": (130, 60, 170),
-    "zombie_venom": (90, 150, 40),
     "bolt": (255, 160, 60),
     "button": (54, 54, 70),
     "button_hover": (76, 76, 98),

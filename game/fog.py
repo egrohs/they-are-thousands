@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .config import VISION_RADIUS
 from .grid import Grid, Pos
+from .stats import VISION_RADIUS
 
 if TYPE_CHECKING:
     from .entities import Building, Unit

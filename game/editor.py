@@ -11,9 +11,10 @@ from typing import Any, Callable, Optional
 
 import pygame
 
-from .config import (COLORS, GRID_H, GRID_W, MAPS_DIR, MAX_SWARM_SIZE, ZOMBIE_SPECS)
+from .config import COLORS, GRID_H, GRID_W, MAPS_DIR, MAX_SWARM_SIZE
 from .entities import CommandCenter, ZombieSwarm
 from .grid import Pos, Terrain
+from .stats import ZOMBIE_SPECS
 from .hud import Button, wrap_text
 from .maps import (MAP_BUILDINGS, MAP_UNITS, MapError, build_grid, grid_to_data, list_maps,
                    load_map, save_map)
@@ -531,7 +532,7 @@ class EditorScreen:
                 b.label = f"+ Qtd {ed.amount}"
             color = None
             if b.action.startswith("z:"):
-                color = COLORS[f"zombie_{b.action[2:]}"]
+                color = ZOMBIE_SPECS[b.action[2:]].color
             elif b.action == "play":
                 color = COLORS["button_active"]
             b.draw(surface, self, b.rect.collidepoint(mouse_pos), b.action == ed.tool, True, color)

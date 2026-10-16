@@ -4,10 +4,9 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-from .config import (BALLISTA_DAMAGE, BALLISTA_RANGE, BUILD_SPECS, HQ_BUILD_RADIUS,
-                     HQ_GOLD_INCOME, HQ_HP, INFECTED_HP, MAX_SWARM_SIZE, TESLA_BUILD_RADIUS,
-                     UNIT_SPECS, ZOMBIE_SPECS, ZombieSpec)
+from .config import MAX_SWARM_SIZE
 from .grid import Pos
+from .stats import BUILDING_STATS, UNIT_SPECS, ZOMBIE_SPECS, BuildingStats, ZombieSpec
 
 
 class Entity:
@@ -37,71 +36,58 @@ class Entity:
 
 # --- Construções -------------------------------------------------------------
 class Building(Entity):
+    """Construção; atributos numéricos vêm de `data/buildings.csv` (linha `kind`)."""
     kind = "building"
     civil = False       # alvo prioritário dos zumbis (gera campo de atração)
     hostile = False     # pertence aos zumbis
-    gold_income = 0
-    build_radius = 0    # >0: expande o território construível
+
+    def __init__(self, pos: Pos):
+        stats: BuildingStats = BUILDING_STATS[self.kind]
+        self.stats = stats
+        self.name = stats.name
+        self.symbol = stats.symbol
+        self.gold_income = stats.gold_income
+        self.build_radius = stats.build_radius   # >0: expande o território construível
+        self.attack_range = stats.attack_range   # >0: dispara automaticamente
+        self.damage = stats.damage
+        self.vision = stats.vision
+        super().__init__(pos, stats.hp)
 
 
 class CommandCenter(Building):
     kind = "hq"
-    name = "Centro de Comando"
-    symbol = "CC"
     civil = True
-    gold_income = HQ_GOLD_INCOME
-    build_radius = HQ_BUILD_RADIUS
     color_key = "hq"
 
-    def __init__(self, pos: Pos):
-        super().__init__(pos, HQ_HP)
 
-
-class _SpecBuilding(Building):
-    def __init__(self, pos: Pos):
-        spec = BUILD_SPECS[self.kind]
-        self.name = spec.name
-        self.symbol = spec.symbol
-        self.gold_income = spec.gold_income
-        super().__init__(pos, spec.hp)
-
-
-class Tent(_SpecBuilding):
+class Tent(Building):
     kind = "tent"
     civil = True
     color_key = "tent"
 
 
-class Wall(_SpecBuilding):
+class Wall(Building):
     kind = "wall"
     color_key = "wall"
 
 
-class Ballista(_SpecBuilding):
+class Ballista(Building):
     kind = "ballista"
     color_key = "ballista"
-    attack_range = BALLISTA_RANGE
-    damage = BALLISTA_DAMAGE
 
 
-class Tesla(_SpecBuilding):
+class Tesla(Building):
     kind = "tesla"
     color_key = "tesla"
-    build_radius = TESLA_BUILD_RADIUS
 
 
 class InfectedHouse(Building):
     kind = "infected"
-    name = "Casa Infectada"
-    symbol = "X"
     hostile = True
     color_key = "infected"
 
-    def __init__(self, pos: Pos):
-        super().__init__(pos, INFECTED_HP)
 
-
-BUILDING_TYPES: dict[str, type[_SpecBuilding]] = {
+BUILDING_TYPES: dict[str, type[Building]] = {
     "wall": Wall,
     "tent": Tent,
     "ballista": Ballista,
@@ -121,6 +107,7 @@ class Unit(Entity):
         self.attack_range = spec.attack_range
         self.damage = spec.damage
         self.noise = spec.noise
+        self.vision = spec.vision
         self.color_key = self.kind
         super().__init__(pos, spec.hp)
         self.moved = False

@@ -1,0 +1,3 @@
+id,name,symbol,hp,move,attack_range,damage,noise,vision,notes
+soldier,Soldado,S,7,3,3,4,6,4,Dano alto; tiros fazem muito barulho
+ranger,Ranger,R,5,4,4,2,1,6,Silencioso; boa visão
