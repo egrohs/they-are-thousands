@@ -2,6 +2,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+
+# --- Áudio ------------------------------------------------------------------
+ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
+MUSIC_DIR = ASSETS_DIR / "audio" / "music"
+MUSIC_EXTENSIONS = {".mp3", ".ogg", ".wav", ".flac"}
+MUSIC_VOLUME_DEFAULT = 0.5
+MUSIC_VOLUME_STEP = 0.1
+MUSIC_FADE_MS = 1500
 
 # --- Grade / Janela -------------------------------------------------------
 GRID_W = 24

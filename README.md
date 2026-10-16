@@ -8,6 +8,7 @@ pip install -r requirements.txt
 python main.py            # mapa aleatório
 python main.py --seed 42  # mapa determinístico
 python main.py --no-fog  # começa com névoa de guerra desligada
+python main.py --no-music  # começa sem trilha sonora
 python -m unittest discover -s tests -t .
 ```
 
@@ -18,10 +19,17 @@ python -m unittest discover -s tests -t .
 | `1` `2` `3` `4` `5` / botões | Construir Muro / Tenda / Balista, Reparar, Construir Tesla |
 | `Esc` | Cancela modo/seleção; sem seleção abre o menu (pausa) |
 | `F` / item do menu | Liga/desliga a névoa de guerra |
+| `M` / item do menu | Liga/desliga a música |
+| `-` `+` (menu: `←` `→`) | Volume da música |
+| `N` | Próxima faixa |
 | Botão direito | Cancela modo/seleção |
 | `Espaço` / botão | Encerrar turno |
 | WASD/Setas, botão do meio, roda | Câmera e zoom |
 | `Ctrl+R` (ou `R` no fim) | Novo mapa |
+
+## Trilha sonora
+Todos os arquivos `.mp3/.ogg/.wav/.flac` em `assets/audio/music/` tocam em ordem alfabética,
+em loop, com fade. Sem dispositivo de áudio ou com arquivo inválido, o jogo segue sem música.
 
 ## Névoa de guerra (FOW)
 Adaptada de *They Are Billions*; liga/desliga pelo menu inicial/pausa ou `F`, a qualquer momento.
@@ -54,5 +62,6 @@ Construa Teslas na borda para avançar; se uma Tesla cair, o território dela so
 - `game/renderer.py` – câmera (offset/zoom) e desenho
 - `game/hud.py` – painel lateral
 - `game/fog.py` – névoa de guerra (visível/explorado)
+- `game/audio.py` – player da trilha sonora
 - `game/menu.py` – menu inicial/pausa e configurações
 - `game/app.py` – loop principal e entrada

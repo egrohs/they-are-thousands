@@ -6,7 +6,8 @@ from typing import Optional
 import pygame
 
 from .config import (BUILD_SPECS, CAMERA_PAN_SPEED, COLORS, FOW_ENABLED_DEFAULT, FPS, GRID_H,
-                     GRID_W, HUD_W, VIEW_H, VIEW_W, WINDOW_H, WINDOW_W)
+                     GRID_W, HUD_W, MUSIC_VOLUME_STEP, VIEW_H, VIEW_W, WINDOW_H, WINDOW_W)
+from .audio import MusicPlayer
 from .grid import Pos
 from .hud import HUD
 from .menu import Menu, Settings
@@ -20,7 +21,7 @@ MODE_KEYS = {pygame.K_1: "wall", pygame.K_2: "tent", pygame.K_3: "ballista", pyg
 
 class GameApp:
     def __init__(self, seed: Optional[int] = None, fog_enabled: bool = FOW_ENABLED_DEFAULT,
-                 show_menu: bool = True):
+                 show_menu: bool = True, music_enabled: bool = True):
         pygame.init()
         pygame.display.set_caption("They Are Thousands - Protótipo Tático")
         self.screen = pygame.display.set_mode((WINDOW_W, WINDOW_H))
@@ -28,7 +29,11 @@ class GameApp:
         self.viewport = pygame.Rect(0, 0, VIEW_W, VIEW_H)
         self.hud = HUD(pygame.Rect(VIEW_W, 0, HUD_W, WINDOW_H))
         self.renderer = Renderer()
-        self.settings = Settings(fog_enabled=fog_enabled)
+        self.settings = Settings(fog_enabled=fog_enabled, music_enabled=music_enabled)
+        self.music = MusicPlayer(enabled=music_enabled)
+        self.settings.music_volume = self.music.volume
+        self.settings.music_available = self.music.can_play
+        self.music.start()
         self.menu = Menu(self.screen.get_rect())
         self.menu.open = show_menu
         self.menu.started = not show_menu
@@ -63,8 +68,22 @@ class GameApp:
             self.menu.started = True
         elif action == "toggle_fog":
             self.set_fog(not self.settings.fog_enabled)
+        elif action == "toggle_music":
+            self.toggle_music()
+        elif action in ("volume_up", "volume_down"):
+            self.change_volume(MUSIC_VOLUME_STEP if action == "volume_up" else -MUSIC_VOLUME_STEP)
         elif action == "quit":
             self.running = False
+
+    def toggle_music(self) -> None:
+        self.music.toggle()
+        self.settings.music_enabled = self.music.enabled
+        if self.music.error and self.music.enabled:
+            self.world.message(self.music.error)
+
+    def change_volume(self, delta: float) -> None:
+        self.music.change_volume(delta)
+        self.settings.music_volume = self.music.volume
 
     # ------------------------------------------------------------------
     def run(self, max_frames: Optional[int] = None) -> None:
@@ -82,7 +101,9 @@ class GameApp:
 
     # ------------------------------------------------------------------
     def handle_event(self, event: pygame.event.Event) -> None:
-        if event.type == pygame.QUIT:
+        if event.type == MusicPlayer.END_EVENT:
+            self.music.handle_event(event)
+        elif event.type == pygame.QUIT:
             self.running = False
         elif self.menu.open:
             action = self.menu.handle_event(event, self.settings)
@@ -116,6 +137,14 @@ class GameApp:
                 self.open_menu()
         elif event.key == pygame.K_f:
             self.set_fog(not self.settings.fog_enabled)
+        elif event.key == pygame.K_m:
+            self.toggle_music()
+        elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
+            self.change_volume(-MUSIC_VOLUME_STEP)
+        elif event.key in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):
+            self.change_volume(MUSIC_VOLUME_STEP)
+        elif event.key == pygame.K_n:
+            self.music.next_track()
         elif event.key in (pygame.K_SPACE, pygame.K_RETURN):
             self.end_turn()
         elif event.key in MODE_KEYS:
@@ -212,7 +241,8 @@ class GameApp:
         if self.world.game_over and not self.turns.busy:
             self._draw_game_over()
         if self.menu.open:
-            self.menu.draw(self.screen, self.settings)
+            self.menu.draw(self.screen, self.settings,
+                           self.music.current_track if self.music.playing else None)
         pygame.display.flip()
 
     def _draw_game_over(self) -> None:

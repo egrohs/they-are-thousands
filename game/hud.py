@@ -199,6 +199,6 @@ class HUD:
         for line in wrapped[-max_lines:] if max_lines else []:
             surface.blit(font.render(line, True, COLORS["text_dim"]), (x, y))
             y += line_h
-        help_text = "WASD/Setas: câmera | Roda: zoom | Esc: menu"
+        help_text = "WASD: câmera | Roda: zoom | M: música | -/+: volume | Esc: menu"
         surface.blit(self.font(17).render(help_text, True, COLORS["text_dim"]),
                      (x, self.rect.bottom - 22))
