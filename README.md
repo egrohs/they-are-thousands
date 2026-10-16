@@ -7,6 +7,7 @@ Sobreviva 15 turnos protegendo o **Centro de Comando (CC)**; a horda final surge
 pip install -r requirements.txt
 python main.py            # mapa aleatório
 python main.py --seed 42  # mapa determinístico
+python main.py --no-fog  # começa com névoa de guerra desligada
 python -m unittest discover -s tests -t .
 ```
 
@@ -15,10 +16,21 @@ python -m unittest discover -s tests -t .
 |---|---|
 | Clique em unidade | Seleciona (azul = mover, vermelho = atacar, amarelo = coletar) |
 | `1` `2` `3` `4` `5` / botões | Construir Muro / Tenda / Balista, Reparar, Construir Tesla |
-| Botão direito / `Esc` | Cancela modo/seleção |
+| `Esc` | Cancela modo/seleção; sem seleção abre o menu (pausa) |
+| `F` / item do menu | Liga/desliga a névoa de guerra |
+| Botão direito | Cancela modo/seleção |
 | `Espaço` / botão | Encerrar turno |
 | WASD/Setas, botão do meio, roda | Câmera e zoom |
 | `Ctrl+R` (ou `R` no fim) | Novo mapa |
+
+## Névoa de guerra (FOW)
+Adaptada de *They Are Billions*; liga/desliga pelo menu inicial/pausa ou `F`, a qualquer momento.
+- **Inexplorado** (preto): nada é conhecido. **Explorado** (escurecido): terreno e construções
+  ficam na memória, mas zumbis não aparecem. **Visível**: raio circular de visão aliado
+  (CC 6, Ranger 6, Balista 5, Soldado 4, Tesla 4, Tenda 3, Muro 2).
+- Só é possível atacar (unidades e Balistas) enxames visíveis; o HUD mostra apenas zumbis à vista.
+- Movimentos podem atravessar a névoa: se um enxame oculto ou terreno desconhecido bloquear o
+  caminho, a unidade para antes (**emboscada**) e perde o movimento.
 
 ## Território
 Só se constrói dentro do território (contorno azul no mapa): raio 4 do CC e raio 3 de cada
@@ -41,4 +53,6 @@ Construa Teslas na borda para avançar; se uma Tesla cair, o território dela so
 - `game/turns.py` – máquina de estados das fases
 - `game/renderer.py` – câmera (offset/zoom) e desenho
 - `game/hud.py` – painel lateral
+- `game/fog.py` – névoa de guerra (visível/explorado)
+- `game/menu.py` – menu inicial/pausa e configurações
 - `game/app.py` – loop principal e entrada

@@ -109,6 +109,58 @@ class WorldTests(unittest.TestCase):
         self.assertLess(ranger.hp, hp)
 
 
+class FogTests(unittest.TestCase):
+    def setUp(self):
+        self.world = World(seed=123)
+        clear_swarms(self.world)
+        self.soldier = next(u for u in self.world.grid.units() if isinstance(u, Soldier))
+
+    def _clear_tile(self, pos):
+        t = self.world.grid.tile(pos)
+        t.terrain, t.building, t.unit, t.swarm = Terrain.GRASS, None, None, None
+
+    def test_initial_visibility_and_exploration(self):
+        fog = self.world.fog
+        self.assertIn(self.world.center, fog.visible)
+        self.assertNotIn((0, 0), fog.explored)
+        self.assertFalse(fog.is_visible((0, 0)))
+
+    def test_hidden_swarm_cannot_be_attacked_until_fog_disabled(self):
+        self.soldier.attack_range = 20
+        pos = (0, 0)
+        self._clear_tile(pos)
+        self.world.grid.place_swarm(ZombieSwarm(pos, 3))
+        self.assertNotIn(pos, self.world.attack_targets(self.soldier))
+        self.world.fog.enabled = False
+        self.assertIn(pos, self.world.attack_targets(self.soldier))
+
+    def test_ambush_interrupts_movement_through_fog(self):
+        self.world.fog.visible.clear()
+        self.world.fog.explored.clear()
+        sx, sy = self.soldier.pos
+        for i in range(1, 4):
+            self._clear_tile((sx + i, sy))
+        self.world.grid.place_swarm(ZombieSwarm((sx + 2, sy), 2))
+        self.world.fog.visible.clear()
+        self.world.fog.explored.clear()
+        moves = self.world.unit_moves(self.soldier)
+        self.assertIn((sx + 3, sy), moves)
+        path = self.world._path_to(self.soldier.pos, (sx + 3, sy), moves)
+        if (sx + 2, sy) not in path:
+            self.skipTest("caminho alternativo não passa pelo enxame")
+        self.world.move_unit(self.soldier, (sx + 3, sy))
+        self.assertEqual(self.soldier.pos, (sx + 1, sy))
+        self.assertTrue(self.soldier.moved)
+        self.assertIn("Emboscada", self.world.log[-1])
+
+    def test_explored_memory_persists(self):
+        ranger = next(u for u in self.world.grid.units() if isinstance(u, Ranger))
+        old = set(self.world.fog.visible)
+        self.world.grid.remove_unit(ranger)
+        self.world.update_fog()
+        self.assertTrue(old <= self.world.fog.explored)
+
+
 class TurnFlowTests(unittest.TestCase):
     def test_full_game_runs_to_completion_deterministically(self):
         results = []

@@ -9,13 +9,14 @@ from dataclasses import dataclass
 from typing import Optional
 
 from .config import (AGGRO_DISTANCE, AP_PER_TURN, ATTACK_AP, BALLISTA_NOISE, BUILD_SPECS,
-                     HQ_BUILD_RADIUS, TESLA_BUILD_RADIUS, FINAL_HORDE, FINAL_HORDE_TURN, FOREST_MOVE_COST, GATHER_AMOUNT,
+                     FOW_ENABLED_DEFAULT, HQ_BUILD_RADIUS, TESLA_BUILD_RADIUS, FINAL_HORDE, FINAL_HORDE_TURN, FOREST_MOVE_COST, GATHER_AMOUNT,
                      GATHER_AP, GATHER_NOISE, GRID_H, GRID_W, INFECTED_SPAWN, MAX_TURNS,
                      NOISE_MEMORY_TURNS, REPAIR_AMOUNT, REPAIR_AP, REPAIR_NOISE, REPAIR_WOOD,
                      RESOURCE_LABELS, START_RESOURCES, WALL_BASH_COST, WANDER_CHANCE, WAVES,
                      ZOMBIE_SPEED)
 from .entities import (BUILDING_TYPES, Ballista, Building, CommandCenter, Entity, InfectedHouse,
                        Ranger, Soldier, Tent, Unit, ZombieSwarm)
+from .fog import FogOfWar
 from .grid import INF, Grid, Pos, Terrain
 
 MAX_LOG = 80
@@ -36,10 +37,11 @@ class Effect:
 
 
 class World:
-    def __init__(self, seed: Optional[int] = None):
+    def __init__(self, seed: Optional[int] = None, fog_enabled: bool = FOW_ENABLED_DEFAULT):
         self.seed = seed if seed is not None else random.randrange(1_000_000)
         self.rng = random.Random(self.seed)
         self.grid = Grid(GRID_W, GRID_H)
+        self.fog = FogOfWar(self.grid, fog_enabled)
         self.resources: dict[str, int] = dict(START_RESOURCES)
         self.ap = AP_PER_TURN
         self.turn = 1
@@ -68,6 +70,13 @@ class World:
     @property
     def total_zombies(self) -> int:
         return sum(s.count for s in self.grid.swarms())
+
+    @property
+    def visible_zombies(self) -> int:
+        return sum(s.count for s in self.grid.swarms() if self.fog.is_visible(s.pos))
+
+    def update_fog(self) -> None:
+        self.fog.update()
 
     def infected_houses(self) -> list[InfectedHouse]:
         return [b for b in self.grid.buildings() if isinstance(b, InfectedHouse)]
@@ -190,6 +199,7 @@ class World:
         spec = BUILD_SPECS[kind]
         self._spend(spec.ap, spec.cost)
         self.grid.place_building(BUILDING_TYPES[kind](pos))
+        self.update_fog()
         self.emit_noise(pos, spec.noise, spec.name)
         self.message(f"{spec.name} construído(a) em {pos}.")
         return True
@@ -227,7 +237,13 @@ class World:
     # Ações do jogador: unidades
     # ======================================================================
     def _unit_passable(self, pos: Pos) -> bool:
-        return self.grid.is_free(pos)
+        """Passabilidade segundo o conhecimento do jogador (névoa esconde enxames/terreno)."""
+        if not self.fog.is_explored(pos):
+            return True
+        tile = self.grid.tile(pos)
+        if not tile.terrain.passable or tile.building is not None or tile.unit is not None:
+            return False
+        return tile.swarm is None or not self.fog.is_visible(pos)
 
     def unit_moves(self, unit: Unit) -> dict[Pos, int]:
         if self.game_over or unit.moved or not unit.alive:
@@ -236,12 +252,33 @@ class World:
         reach.pop(unit.pos, None)
         return reach
 
+    def _path_to(self, start: Pos, dest: Pos, reach: dict[Pos, int]) -> list[Pos]:
+        dist = dict(reach)
+        dist[start] = 0
+        path = [dest]
+        cur = dest
+        while dist[cur] > 1:
+            cur = min(n for n in self.grid.neighbors4(cur) if dist.get(n) == dist[cur] - 1)
+            path.append(cur)
+        path.reverse()
+        return path
+
     def move_unit(self, unit: Unit, dest: Pos) -> bool:
-        if dest not in self.unit_moves(unit):
+        reach = self.unit_moves(unit)
+        if dest not in reach:
             self.message(f"{unit.name} não alcança {dest}.")
             return False
-        self.grid.move_unit(unit, dest)
         unit.moved = True
+        for step in self._path_to(unit.pos, dest, reach):
+            if not self.grid.is_free(step):
+                tile = self.grid.tile(step)
+                if tile.swarm is not None:
+                    self.message(f"Emboscada! {unit.name} topou com zumbis ocultos em {step}.")
+                else:
+                    self.message(f"{unit.name} encontrou terreno intransponível em {step}.")
+                break
+            self.grid.move_unit(unit, step)
+            self.update_fog()
         return True
 
     def attack_targets(self, unit: Unit) -> list[Pos]:
@@ -249,6 +286,8 @@ class World:
             return []
         targets = []
         for p in self.grid.tiles_in_radius(unit.pos, unit.attack_range, "chebyshev"):
+            if not self.fog.is_visible(p):
+                continue
             t = self.grid.tile(p)
             if t.swarm is not None or (t.building is not None and t.building.hostile):
                 targets.append(p)
@@ -311,6 +350,7 @@ class World:
         self.ap = AP_PER_TURN
         for u in self.grid.units():
             u.reset_turn()
+        self.update_fog()
 
     def propagate_noise(self) -> None:
         """Fase de som: transforma eventos pendentes em mapa de decibéis e alerta enxames."""
@@ -336,7 +376,10 @@ class World:
                 swarm.alert(best[1].pos, NOISE_MEMORY_TURNS)
                 alerted += 1
         if events:
-            self.message(f"Barulho de {len(events)} fonte(s) atraiu {alerted} enxame(s).")
+            if self.fog.enabled:
+                self.message(f"Barulho de {len(events)} fonte(s) ecoou pelo mapa...")
+            else:
+                self.message(f"Barulho de {len(events)} fonte(s) atraiu {alerted} enxame(s).")
 
     def _zombie_enter_cost(self, pos: Pos) -> Optional[float]:
         tile = self.grid.tile(pos)
@@ -425,11 +468,13 @@ class World:
                     break
 
     def ballistas_fire(self) -> None:
+        self.update_fog()
         ballistas = sorted((b for b in self.grid.buildings()
                             if isinstance(b, Ballista) and b.alive), key=lambda b: b.pos)
         for b in ballistas:
             in_range = [s for s in self.grid.swarms()
-                        if Grid.chebyshev(b.pos, s.pos) <= b.attack_range]
+                        if Grid.chebyshev(b.pos, s.pos) <= b.attack_range
+                        and self.fog.is_visible(s.pos)]
             if not in_range:
                 continue
             target = min(in_range, key=lambda s: (Grid.chebyshev(b.pos, s.pos), -s.count, s.pos))

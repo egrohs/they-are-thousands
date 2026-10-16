@@ -156,22 +156,27 @@ class Renderer:
 
         for t in visible:
             self._draw_terrain(surface, cam.tile_rect(t.pos), t.terrain, t.resource_amount, ts)
+        if world.fog.enabled:
+            self._draw_fog(surface, world, cam, visible)
 
         self._draw_overlays(surface, world, cam, ui)
         self._draw_territory_border(surface, world, cam)
 
+        fog = world.fog
         for t in visible:
             rect = cam.tile_rect(t.pos)
             if t.building is not None:
                 self._draw_building(surface, rect, t.building, ts)
             if t.unit is not None:
                 self._draw_unit(surface, rect, t.unit, ts, t.unit is ui.selected_unit)
-            if t.swarm is not None:
+            if t.swarm is not None and fog.is_visible(t.pos):
                 self._draw_swarm(surface, rect, t.swarm, ts)
 
         self._draw_pending_noise(surface, world, cam)
 
         for eff in world.effects:
+            if not (fog.is_visible(eff.start) or fog.is_visible(eff.end)):
+                continue
             a = cam.tile_rect(eff.start).center
             b = cam.tile_rect(eff.end).center
             pygame.draw.line(surface, COLORS[eff.color_key], a, b, max(2, int(ts / 12)))
@@ -233,6 +238,17 @@ class Renderer:
             tl = cam.tile_rect((u.pos[0] - r, u.pos[1] - r)).topleft
             br = cam.tile_rect((u.pos[0] + r, u.pos[1] + r)).bottomright
             pygame.draw.rect(surface, COLORS["attack"], pygame.Rect(tl, (br[0] - tl[0], br[1] - tl[1])), 1)
+
+    def _draw_fog(self, surface, world: World, cam: Camera, tiles) -> None:
+        fog = world.fog
+        for t in tiles:
+            if t.pos in fog.visible:
+                continue
+            rect = cam.tile_rect(t.pos)
+            if t.pos in fog.explored:
+                self._overlay(surface, rect, COLORS["fog_explored"], 150)
+            else:
+                pygame.draw.rect(surface, COLORS["fog_unexplored"], rect)
 
     def _draw_territory_border(self, surface, world: World, cam: Camera) -> None:
         zone = world.build_zone()

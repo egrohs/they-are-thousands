@@ -5,10 +5,11 @@ from typing import Optional
 
 import pygame
 
-from .config import (BUILD_SPECS, CAMERA_PAN_SPEED, COLORS, FPS, GRID_H, GRID_W, HUD_W,
-                     VIEW_H, VIEW_W, WINDOW_H, WINDOW_W)
+from .config import (BUILD_SPECS, CAMERA_PAN_SPEED, COLORS, FOW_ENABLED_DEFAULT, FPS, GRID_H,
+                     GRID_W, HUD_W, VIEW_H, VIEW_W, WINDOW_H, WINDOW_W)
 from .grid import Pos
 from .hud import HUD
+from .menu import Menu, Settings
 from .renderer import Camera, Renderer, UIState
 from .turns import TurnManager
 from .world import World
@@ -18,7 +19,8 @@ MODE_KEYS = {pygame.K_1: "wall", pygame.K_2: "tent", pygame.K_3: "ballista", pyg
 
 
 class GameApp:
-    def __init__(self, seed: Optional[int] = None):
+    def __init__(self, seed: Optional[int] = None, fog_enabled: bool = FOW_ENABLED_DEFAULT,
+                 show_menu: bool = True):
         pygame.init()
         pygame.display.set_caption("They Are Thousands - Protótipo Tático")
         self.screen = pygame.display.set_mode((WINDOW_W, WINDOW_H))
@@ -26,15 +28,43 @@ class GameApp:
         self.viewport = pygame.Rect(0, 0, VIEW_W, VIEW_H)
         self.hud = HUD(pygame.Rect(VIEW_W, 0, HUD_W, WINDOW_H))
         self.renderer = Renderer()
+        self.settings = Settings(fog_enabled=fog_enabled)
+        self.menu = Menu(self.screen.get_rect())
+        self.menu.open = show_menu
+        self.menu.started = not show_menu
         self.running = True
         self._drag_origin: Optional[tuple[int, int]] = None
         self.new_game(seed)
 
     def new_game(self, seed: Optional[int] = None) -> None:
-        self.world = World(seed)
+        self.world = World(seed, fog_enabled=self.settings.fog_enabled)
         self.turns = TurnManager(self.world)
         self.camera = Camera(self.viewport, GRID_W, GRID_H)
         self.ui = UIState()
+
+    def set_fog(self, enabled: bool) -> None:
+        self.settings.fog_enabled = enabled
+        self.world.fog.enabled = enabled
+        self.world.update_fog()
+
+    def open_menu(self) -> None:
+        self.cancel()
+        self._drag_origin = None
+        self.menu.open = True
+        self.menu.focus = 0
+
+    def _on_menu_action(self, action: str) -> None:
+        if action == "resume":
+            self.menu.open = False
+            self.menu.started = True
+        elif action == "new_game":
+            self.new_game()
+            self.menu.open = False
+            self.menu.started = True
+        elif action == "toggle_fog":
+            self.set_fog(not self.settings.fog_enabled)
+        elif action == "quit":
+            self.running = False
 
     # ------------------------------------------------------------------
     def run(self, max_frames: Optional[int] = None) -> None:
@@ -54,6 +84,10 @@ class GameApp:
     def handle_event(self, event: pygame.event.Event) -> None:
         if event.type == pygame.QUIT:
             self.running = False
+        elif self.menu.open:
+            action = self.menu.handle_event(event, self.settings)
+            if action is not None:
+                self._on_menu_action(action)
         elif event.type == pygame.KEYDOWN:
             self._on_key(event)
         elif event.type == pygame.MOUSEWHEEL:
@@ -76,7 +110,12 @@ class GameApp:
         if event.key == pygame.K_r and (event.mod & pygame.KMOD_CTRL or self.world.game_over):
             self.new_game()
         elif event.key == pygame.K_ESCAPE:
-            self.cancel()
+            if self.ui.mode or self.ui.selected_unit:
+                self.cancel()
+            else:
+                self.open_menu()
+        elif event.key == pygame.K_f:
+            self.set_fog(not self.settings.fog_enabled)
         elif event.key in (pygame.K_SPACE, pygame.K_RETURN):
             self.end_turn()
         elif event.key in MODE_KEYS:
@@ -101,6 +140,8 @@ class GameApp:
         if button is not None:
             if button.action == "end_turn":
                 self.end_turn()
+            elif button.action == "menu":
+                self.open_menu()
             else:
                 self.set_mode(button.action)
             return
@@ -140,6 +181,8 @@ class GameApp:
 
     # ------------------------------------------------------------------
     def update(self, dt: float) -> None:
+        if self.menu.open:
+            return
         keys = pygame.key.get_pressed()
         dx = (keys[pygame.K_d] or keys[pygame.K_RIGHT]) - (keys[pygame.K_a] or keys[pygame.K_LEFT])
         dy = (keys[pygame.K_s] or keys[pygame.K_DOWN]) - (keys[pygame.K_w] or keys[pygame.K_UP])
@@ -168,6 +211,8 @@ class GameApp:
         self.hud.draw(self.screen, self.world, self.turns, self.ui, pygame.mouse.get_pos())
         if self.world.game_over and not self.turns.busy:
             self._draw_game_over()
+        if self.menu.open:
+            self.menu.draw(self.screen, self.settings)
         pygame.display.flip()
 
     def _draw_game_over(self) -> None:

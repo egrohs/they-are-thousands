@@ -57,6 +57,18 @@ FINAL_HORDE = (8, 9)
 
 PHASE_DELAY = 0.45  # segundos exibindo cada fase automática
 
+# --- Névoa de guerra --------------------------------------------------------
+FOW_ENABLED_DEFAULT = True
+VISION_RADIUS = {
+    "hq": 6,
+    "tesla": 4,
+    "ballista": 5,
+    "tent": 3,
+    "wall": 2,
+    "soldier": 4,
+    "ranger": 6,
+}
+
 
 @dataclass(frozen=True)
 class BuildSpec:
@@ -122,6 +134,9 @@ COLORS: dict[str, tuple[int, int, int]] = {
     "ballista": (168, 96, 44),
     "tesla": (90, 210, 230),
     "territory": (120, 200, 255),
+    "fog_unexplored": (6, 6, 9),
+    "fog_explored": (10, 10, 18),
+    "menu_bg": (12, 12, 16),
     "infected": (120, 180, 40),
     "soldier": (60, 140, 235),
     "ranger": (80, 205, 145),

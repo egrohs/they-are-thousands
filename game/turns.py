@@ -78,6 +78,7 @@ class TurnManager:
             return
         self.phase = self._queue.pop(0)
         self._handlers[self.phase]()
+        self.world.update_fog()
         self.world.check_defeat()
         self._timer = self.phase_delay
 

@@ -83,6 +83,7 @@ class HUD:
             Button(pygame.Rect(x, y + 152, w, 38), "Encerrar Turno  [Espaço]", "end_turn"),
         ]
         self.info_top = y + 202
+        self.menu_button = Button(pygame.Rect(rect.right - 84, 10, 72, 26), "Menu", "menu")
 
     def font(self, size: int) -> pygame.font.Font:
         if size not in self._fonts:
@@ -90,6 +91,8 @@ class HUD:
         return self._fonts[size]
 
     def button_at(self, pos: tuple[int, int]) -> Optional[Button]:
+        if self.menu_button.rect.collidepoint(pos):
+            return self.menu_button
         return next((b for b in self.buttons if b.rect.collidepoint(pos)), None)
 
     def _line(self, surface, text: str, pos: tuple[int, int], size: int = 22,
@@ -122,12 +125,18 @@ class HUD:
         else:
             left = FINAL_HORDE_TURN - world.turn
             horde = f"Horda final em {left} turno(s)" if left > 0 else "Horda final ao fim deste turno!"
-        self._line(surface, f"Zumbis: {world.total_zombies}   {horde}", (x, y), 19, COLORS["defeat"])
+        if world.fog.enabled:
+            zombies = f"Zumbis à vista: {world.visible_zombies}"
+        else:
+            zombies = f"Zumbis: {world.total_zombies}"
+        self._line(surface, f"{zombies}   {horde}", (x, y), 19, COLORS["defeat"])
 
         enabled = turns.is_player_phase and not world.game_over
         for b in self.buttons:
             b.draw(surface, self, b.rect.collidepoint(mouse_pos), ui.mode == b.action, enabled,
                    COLORS["end_turn"] if b.action == "end_turn" else None)
+        self.menu_button.draw(surface, self, self.menu_button.rect.collidepoint(mouse_pos),
+                              False, True)
 
         y = self._draw_info(surface, world, ui, x, self.info_top)
         self._draw_log(surface, world, x, y + 8)
@@ -142,18 +151,23 @@ class HUD:
             lines.append((f"Mov {u.move_range}{' (usado)' if u.moved else ''} | Alc {u.attack_range}"
                           f" | Dano {u.damage} | Ruído {u.noise}"
                           f"{' | agiu' if u.acted else ''}", COLORS["text_dim"]))
-        if pos is not None:
+        if pos is not None and not world.fog.is_explored(pos):
+            lines.append((f"Tile {pos}: Inexplorado", COLORS["text_dim"]))
+        elif pos is not None:
             t = world.grid.tile(pos)
+            seen = world.fog.is_visible(pos)
             terrain = t.terrain.label
             if t.terrain.resource:
                 terrain += f" ({RESOURCE_LABELS[t.terrain.resource]} {t.resource_amount})"
+            if not seen:
+                terrain += " — sob névoa"
             lines.append((f"Tile {pos}: {terrain}", COLORS["text"]))
             if t.building is not None:
                 b = t.building
                 lines.append((f"{b.name} HP {b.hp}/{b.max_hp}", COLORS[b.color_key]))
             if t.unit is not None and t.unit is not ui.selected_unit:
                 lines.append((f"{t.unit.name} HP {t.unit.hp}/{t.unit.max_hp}", COLORS[t.unit.color_key]))
-            if t.swarm is not None:
+            if t.swarm is not None and seen:
                 s = t.swarm
                 state = "agressivo" if s.aggressive else "ocioso"
                 if s.noise_target is not None:
@@ -185,6 +199,6 @@ class HUD:
         for line in wrapped[-max_lines:] if max_lines else []:
             surface.blit(font.render(line, True, COLORS["text_dim"]), (x, y))
             y += line_h
-        help_text = "WASD/Setas: câmera | Roda: zoom | Ctrl+R: novo mapa"
+        help_text = "WASD/Setas: câmera | Roda: zoom | Esc: menu"
         surface.blit(self.font(17).render(help_text, True, COLORS["text_dim"]),
                      (x, self.rect.bottom - 22))
