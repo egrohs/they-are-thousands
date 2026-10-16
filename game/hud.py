@@ -54,6 +54,10 @@ def wave_status(world: World) -> str:
     return f"{label}: {wave.directions} ~{wave.zombies} - {when}"
 
 
+def t_label(resource: str) -> str:
+    return {"wood": "Floresta", "stone": "Pedreira"}.get(resource, resource)
+
+
 def _name(kind: str) -> str:
     return BUILDING_STATS[kind].name
 
@@ -97,9 +101,13 @@ class HUD:
                    _cost_text("tesla") + f" | r{BUILDING_STATS['tesla'].build_radius}"),
             Button(pygame.Rect(x + half + 8, y + 100, half, 44), f"[6] {_name('watchtower')}",
                    "watchtower", _cost_text("watchtower")),
-            Button(pygame.Rect(x, y + 152, w, 38), "Encerrar Turno  [Espaço]", "end_turn"),
+            Button(pygame.Rect(x, y + 150, half, 44), f"[7] {_name('sawmill')}", "sawmill",
+                   _cost_text("sawmill")),
+            Button(pygame.Rect(x + half + 8, y + 150, half, 44), f"[8] {_name('quarry')}",
+                   "quarry", _cost_text("quarry")),
+            Button(pygame.Rect(x, y + 202, w, 38), "Encerrar Turno  [Espaço]", "end_turn"),
         ]
-        self.info_top = y + 202
+        self.info_top = y + 250
         self.menu_button = Button(pygame.Rect(rect.right - 84, 10, 72, 26), "Menu", "menu")
 
     def font(self, size: int) -> pygame.font.Font:
@@ -131,11 +139,15 @@ class HUD:
 
         res_y = y + 2
         col = x
+        prod = world.production()
         for key in ("gold", "wood", "stone"):
             txt = f"{RESOURCE_LABELS[key]}: {world.resources[key]}"
             img = self.font(22).render(txt, True, COLORS[key])
             surface.blit(img, (col, res_y))
-            col += img.get_width() + 14
+            col += img.get_width() + 3
+            delta = self.font(17).render(f"(+{prod[key]})", True, COLORS["text_dim"])
+            surface.blit(delta, (col, res_y + 4))
+            col += delta.get_width() + 10
         y = res_y + 22
         if world.crates_total:
             self._line(surface, f"Caixas: {world.crates_found}/{world.crates_total}",
@@ -179,6 +191,13 @@ class HUD:
             lines.append((f"Mov {u.move_range}{' (usado)' if u.moved else ''} | Alc {world.unit_range(u)}"
                           f" | Dano {u.damage} | Ruído {u.noise}"
                           f"{' | agiu' if u.acted else ''}", COLORS["text_dim"]))
+        if (pos is not None and ui.mode in BUILDING_STATS and BUILDING_STATS[ui.mode].harvest
+                and world.fog.is_known(pos)):
+            tiles, amount = world.harvest_preview(ui.mode, pos)
+            spec = BUILDING_STATS[ui.mode]
+            lines.append((f"{spec.name} aqui: {len(tiles)} tile(s) livre(s) de "
+                          f"{t_label(spec.harvest)} -> +{amount} {RESOURCE_LABELS[spec.harvest]}/turno",
+                          COLORS[ui.mode]))
         if pos is not None and world.fog.is_dark(pos):
             lines.append((f"Tile {pos}: Escuridão - nenhum aliado por perto", COLORS["text_dim"]))
         elif pos is not None and not world.fog.is_explored(pos):
@@ -200,6 +219,12 @@ class HUD:
             if t.building is not None:
                 b = t.building
                 lines.append((f"{b.name} HP {b.hp}/{b.max_hp}", COLORS[b.color_key]))
+                if b.harvest and not b.hostile:
+                    tiles = world.harvest_claims().get(b, [])
+                    amount = world.harvest_yield(b.kind, len(tiles))
+                    lines.append((f"Extrai {len(tiles)} tile(s) de {t_label(b.harvest)}: "
+                                  f"+{amount} {RESOURCE_LABELS[b.harvest]}/turno "
+                                  f"(máx. {b.stats.harvest_max})", COLORS["text_dim"]))
                 if b.garrison:
                     guest = world.garrisoned(b)
                     lines.append((f"Abriga: {guest.name}" if guest else

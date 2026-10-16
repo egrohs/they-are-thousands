@@ -1,6 +1,7 @@
 """Entidades do jogo: construções, unidades do jogador e enxames zumbis."""
 from __future__ import annotations
 
+import itertools
 import math
 from typing import Optional
 
@@ -40,6 +41,7 @@ class Building(Entity):
     kind = "building"
     civil = False       # alvo prioritário dos zumbis (gera campo de atração)
     hostile = False     # pertence aos zumbis
+    _serials = itertools.count()
 
     def __init__(self, pos: Pos):
         stats: BuildingStats = BUILDING_STATS[self.kind]
@@ -54,6 +56,8 @@ class Building(Entity):
         self.garrison = stats.garrison           # abriga uma unidade no próprio tile
         self.range_bonus = stats.range_bonus
         self.vision_bonus = stats.vision_bonus
+        self.harvest = stats.harvest             # "wood"/"stone": extrai do terreno ao redor
+        self.serial = next(Building._serials)    # ordem de construção (prioridade nos tiles)
         super().__init__(pos, stats.hp)
 
 
@@ -90,6 +94,18 @@ class Watchtower(Building):
     color_key = "watchtower"
 
 
+class Sawmill(Building):
+    """Serraria: Madeira por turno conforme as Florestas no raio (como no They Are Billions)."""
+    kind = "sawmill"
+    color_key = "sawmill"
+
+
+class Quarry(Building):
+    """Extrator de Pedra: Pedra por turno conforme as Pedreiras no raio."""
+    kind = "quarry"
+    color_key = "quarry"
+
+
 class InfectedHouse(Building):
     kind = "infected"
     hostile = True
@@ -102,6 +118,8 @@ BUILDING_TYPES: dict[str, type[Building]] = {
     "ballista": Ballista,
     "tesla": Tesla,
     "watchtower": Watchtower,
+    "sawmill": Sawmill,
+    "quarry": Quarry,
 }
 
 

@@ -241,6 +241,17 @@ class Renderer:
             img = f.render(str(amount), True, COLORS["gold"])
             surface.blit(img, (rect.right - img.get_width() - 2, rect.top + 1))
 
+    def _draw_harvest_preview(self, surface, world: World, cam: Camera, kind: str, pos: Pos) -> None:
+        spec = BUILD_SPECS[kind]
+        area = cam.tile_rect(pos).inflate(cam.tile_px * 2 * spec.harvest_radius,
+                                          cam.tile_px * 2 * spec.harvest_radius)
+        pygame.draw.rect(surface, COLORS["harvest"], area, 1)
+        tiles, amount = world.harvest_preview(kind, pos)
+        for p in tiles:
+            pygame.draw.rect(surface, COLORS["harvest"], cam.tile_rect(p).inflate(-4, -4), 2)
+        label = f"+{amount}/turno"
+        self._label(surface, label, (area.centerx, area.top - 10), 20, COLORS["harvest"], cam.viewport)
+
     def _draw_crate(self, surface, rect: pygame.Rect, kind: str, ts) -> None:
         """Caixa de madeira com faixa na cor do tipo (data/crates.csv)."""
         spec = CRATE_SPECS.get(kind)
@@ -269,6 +280,14 @@ class Renderer:
                 ok, _ = world.can_build(ui.mode, p, zone)
                 self._overlay(surface, cam.tile_rect(p),
                               COLORS["build_ok"] if ok else COLORS["build_bad"], 55 if ok else 25)
+            if BUILD_SPECS[ui.mode].harvest and ui.hover_tile is not None:
+                self._draw_harvest_preview(surface, world, cam, ui.mode, ui.hover_tile)
+        elif ui.selected_tile is not None:
+            b = world.grid.tile(ui.selected_tile).building
+            if b is not None and b.harvest and world.fog.is_known(b.pos):
+                tiles = world.harvest_claims().get(b, [])
+                for p in tiles:
+                    pygame.draw.rect(surface, COLORS["harvest"], cam.tile_rect(p).inflate(-4, -4), 2)
         elif ui.mode == "repair":
             for b in world.grid.buildings():
                 if world.can_repair(b.pos)[0]:

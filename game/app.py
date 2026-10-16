@@ -20,7 +20,8 @@ from .turns import TurnManager
 from .world import World
 
 MODE_KEYS = {pygame.K_1: "wall", pygame.K_2: "tent", pygame.K_3: "ballista", pygame.K_4: "repair",
-             pygame.K_5: "tesla", pygame.K_6: "watchtower"}
+             pygame.K_5: "tesla", pygame.K_6: "watchtower",
+             pygame.K_7: "sawmill", pygame.K_8: "quarry"}
 RANDOM_MAP_LABEL = "Aleatório"
 
 

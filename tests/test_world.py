@@ -4,8 +4,9 @@ import unittest
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 from game.config import AP_PER_TURN, MAX_TURNS
-from game.stats import BUILD_SPECS, CRATE_SPECS
-from game.entities import InfectedHouse, Ranger, Soldier, Tent, Wall, Watchtower, ZombieSwarm
+from game.stats import BUILD_SPECS, BUILDING_STATS, CRATE_SPECS
+from game.entities import (InfectedHouse, Quarry, Ranger, Sawmill, Soldier, Tent, Wall, Watchtower,
+                           ZombieSwarm)
 from game.fog import FogOfWar
 from game.grid import Grid, Terrain
 from game.turns import Phase, TurnManager
@@ -216,6 +217,63 @@ class CrateTests(unittest.TestCase):
         fogged = World(seed=3, fog_enabled=True)
         far = next(t for t in fogged.grid if t.crate)
         self.assertFalse(fogged.fog.is_explored(far.pos))
+
+
+class HarvesterTests(unittest.TestCase):
+    def setUp(self):
+        self.world = World(seed=11, fog_enabled=False)
+        for t in self.world.grid:
+            t.terrain, t.resource_amount = Terrain.GRASS, 0
+            t.building = t.unit = t.swarm = t.crate = None
+        self.world.hq.pos = (12, 12)
+        self.world.grid.place_building(self.world.hq)
+        for t in self.world.grid:
+            if t.x <= 1:
+                t.terrain, t.resource_amount = Terrain.FOREST, 5
+
+    def test_sawmill_yield_scales_with_forest_and_caps(self):
+        spec = BUILDING_STATS["sawmill"]
+        mill = Sawmill((3, 5))  # raio 2 alcança as colunas x=1 (5 tiles de floresta)
+        self.world.grid.place_building(mill)
+        tiles = self.world.harvest_claims()[mill]
+        self.assertEqual(len(tiles), 5)
+        self.assertEqual(self.world.harvest_yield("sawmill", 5), min(spec.harvest_max, 5 // spec.harvest_tiles))
+        mill2 = Sawmill((2, 15))  # 10 florestas: limitado ao máximo
+        self.world.grid.place_building(mill2)
+        self.assertEqual(self.world.harvest_yield("sawmill", len(self.world.harvest_claims()[mill2])),
+                         spec.harvest_max)
+
+    def test_overlapping_harvesters_share_tiles(self):
+        a, b = Sawmill((2, 5)), Sawmill((2, 6))
+        self.world.grid.place_building(a)
+        self.world.grid.place_building(b)
+        claims = self.world.harvest_claims()
+        self.assertFalse(set(claims[a]) & set(claims[b]))
+        self.assertEqual(len(claims[a]) + len(claims[b]), 12)  # união das áreas (x=0..1, y=3..8)
+        tiles, _ = self.world.harvest_preview("sawmill", (2, 7))
+        self.assertFalse(set(tiles) & (set(claims[a]) | set(claims[b])))
+
+    def test_end_round_produces_wood_and_stone_without_depleting(self):
+        for y in range(10, 13):
+            self.world.grid.tile((16, y)).terrain = Terrain.ROCK
+            self.world.grid.tile((16, y)).resource_amount = 4
+        self.world.grid.place_building(Sawmill((2, 5)))
+        self.world.grid.place_building(Quarry((15, 11)))
+        prod = self.world.production()
+        self.assertGreater(prod["wood"], 0)
+        self.assertEqual(prod["stone"], 1)  # 3 pedreiras / 2 por unidade
+        before = dict(self.world.resources)
+        self.world.end_round()
+        self.assertEqual(self.world.resources["wood"], before["wood"] + prod["wood"])
+        self.assertEqual(self.world.resources["stone"], before["stone"] + prod["stone"])
+        self.assertEqual(self.world.grid.tile((16, 11)).resource_amount, 4)
+
+    def test_buildable_in_territory(self):
+        self.assertIn("sawmill", BUILD_SPECS)
+        self.assertIn("quarry", BUILD_SPECS)
+        self.world.resources.update(gold=50, wood=50, stone=50)
+        self.assertTrue(self.world.build("quarry", (13, 12)))
+        self.assertIsInstance(self.world.grid.tile((13, 12)).building, Quarry)
 
 
 class ZombieTypeTests(unittest.TestCase):

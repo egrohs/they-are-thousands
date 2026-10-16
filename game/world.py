@@ -245,6 +245,50 @@ class World:
                 self.grid.place_swarm(ZombieSwarm(p, self.rng.randint(2, 5), kind=kind))
                 placed += 1
 
+    # ======================================================================
+    # Produção: Serrarias / Extratores de Pedra
+    # ======================================================================
+    def _harvest_area(self, kind: str, pos: Pos) -> list[Pos]:
+        spec = BUILDING_STATS[kind]
+        return [p for p in self.grid.tiles_in_radius(pos, spec.harvest_radius, "chebyshev")
+                if self.grid.tile(p).terrain.resource == spec.harvest]
+
+    def harvest_claims(self) -> dict[Building, list[Pos]]:
+        """Tiles explorados por cada extrator. Cada tile conta para um único extrator do mesmo
+        recurso (o mais antigo), como no original: sobrepor áreas não duplica a produção."""
+        claimed: set[tuple[str, Pos]] = set()
+        claims: dict[Building, list[Pos]] = {}
+        harvesters = sorted((b for b in self.grid.buildings()
+                             if b.harvest and b.alive and not b.hostile), key=lambda b: b.serial)
+        for b in harvesters:
+            tiles = [p for p in self._harvest_area(b.kind, b.pos) if (b.harvest, p) not in claimed]
+            claimed.update((b.harvest, p) for p in tiles)
+            claims[b] = tiles
+        return claims
+
+    @staticmethod
+    def harvest_yield(kind: str, tiles: int) -> int:
+        spec = BUILDING_STATS[kind]
+        return min(spec.harvest_max, tiles // spec.harvest_tiles) if spec.harvest else 0
+
+    def harvest_preview(self, kind: str, pos: Pos) -> tuple[list[Pos], int]:
+        """Tiles livres e produção/turno de um extrator novo em `pos` (não conta os já usados)."""
+        spec = BUILDING_STATS[kind]
+        taken = {p for b, tiles in self.harvest_claims().items() if b.harvest == spec.harvest
+                 for p in tiles}
+        tiles = [p for p in self._harvest_area(kind, pos) if p not in taken]
+        return tiles, self.harvest_yield(kind, len(tiles))
+
+    def production(self) -> dict[str, int]:
+        """Produção por fim de turno (ouro das Tendas/CC + extratores)."""
+        prod = {"gold": 0, "wood": 0, "stone": 0}
+        for b in self.grid.buildings():
+            if b.alive and not b.hostile:
+                prod["gold"] += b.gold_income
+        for b, tiles in self.harvest_claims().items():
+            prod[b.harvest] += self.harvest_yield(b.kind, len(tiles))
+        return prod
+
     def _place_crates(self) -> None:
         """Espalha caixas de recursos com RNG próprio (não altera o mapa nem a IA)."""
         rng = random.Random(self.seed * 7_919 + 13)
@@ -879,9 +923,11 @@ class World:
 
     def end_round(self) -> None:
         """Cleanup: produção, memória de som, ondas e condição de vitória."""
-        income = sum(b.gold_income for b in self.grid.buildings() if b.alive and not b.hostile)
-        self.resources["gold"] += income
-        self.message(f"Colônia produziu +{income} Ouro.")
+        prod = self.production()
+        for k, v in prod.items():
+            self.resources[k] += v
+        self.message("Colônia produziu " + ", ".join(
+            f"+{v} {RESOURCE_LABELS[k]}" for k, v in prod.items() if v or k == "gold") + ".")
         for s in self.grid.swarms():
             if s.noise_turns > 0:
                 s.noise_turns -= 1

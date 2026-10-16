@@ -18,7 +18,7 @@ python -m unittest discover -s tests -t .
 | Entrada | Ação |
 |---|---|
 | Clique em unidade | Seleciona (azul = mover, vermelho = atacar, amarelo = coletar) |
-| `1` `2` `3` `4` `5` `6` / botões | Construir Muro / Tenda / Balista, Reparar, Construir Tesla, Construir Torre de Vigia |
+| `1` … `8` / botões | Construir Muro / Tenda / Balista, Reparar, Construir Tesla / Torre de Vigia / Serraria / Extrator de Pedra |
 | `Esc` | Cancela modo/seleção; sem seleção abre o menu (pausa) |
 | `F` / item do menu | Liga/desliga a névoa de guerra |
 | `M` / item do menu | Liga/desliga a música |
@@ -33,7 +33,7 @@ python -m unittest discover -s tests -t .
 ## Editor de mapas
 Menu → **Editor de Mapas** (`E`) ou `python main.py --editor`.
 - **Ferramentas** (painel lateral): terreno (Campo, Floresta, Pedreira, Água), construções
-  (CC, Tenda, Muro, Balista, Tesla, Torre de Vigia, Casa Infectada), unidades (Soldado, Ranger), os 5 tipos de
+  (CC, Tenda, Muro, Balista, Tesla, Torre de Vigia, Serraria, Extrator, Casa Infectada), unidades (Soldado, Ranger), os 5 tipos de
   zumbi, as **caixas de recursos** e Borracha. Clique e **arraste** para pintar (ótimo para linhas de muro); botão direito apaga.
 - **Qtd** (`[` `]`): zumbis por enxame (limitado pela pilha máx. do tipo) e recurso do depósito.
   **Pincel** (`B`): 1x1 ou 3x3 para terreno/borracha.
@@ -108,6 +108,22 @@ Só se constrói dentro do território (contorno azul no mapa): raio 4 do CC e r
 **Torre Tesla** (`5`, 1 AP, 3 Ouro, 2 Madeira, HP 4). Tendas, Balistas e Muros não expandem.
 Construa Teslas na borda para avançar; se uma Tesla cair, o território dela some.
 
+## Serraria e Extrator de Pedra
+Produção passiva, como no *They Are Billions*: a construção explora o terreno ao redor
+(raio 2, área 5x5) e rende no **fim de cada turno**, sem esgotar os depósitos.
+
+| Construção | Tecla | Custo | Produção |
+|---|---|---|---|
+| **Serraria** | `7` | 2 AP, 4 Ouro, 2 Madeira, HP 6 | +1 Madeira a cada 2 tiles de Floresta no raio (máx. 4/turno) |
+| **Extrator de Pedra** | `8` | 2 AP, 4 Ouro, 4 Madeira, HP 6 | +1 Pedra a cada 2 tiles de Pedreira no raio (máx. 3/turno) |
+
+- Áreas sobrepostas **não somam**: cada tile serve a um único extrator do mesmo recurso (o
+  mais antigo). Ao posicionar, o mapa contorna os tiles livres e mostra `+N/turno`; o
+  Inspetor detalha a produção. Selecionar um extrator construído destaca os tiles dele.
+- O HUD mostra a renda por turno ao lado de cada recurso, ex.: `Madeira: 12 (+3)`.
+- Coletar com unidades continua possível (e esgota o tile, abrindo passagem); um tile
+  esgotado vira Campo e deixa de render para o extrator.
+
 ## Caixas de recursos
 Mapas aleatórios espalham **7 caixas** fora da base (cada tipo tem distância mínima do centro;
 o sorteio usa RNG próprio, então não altera terreno nem zumbis). Ficam escondidas pela névoa
@@ -146,7 +162,7 @@ isolados (eles viram Floresta), e as ondas entram por tiles da borda com caminho
 3. **Zumbis** – enxames tipados (pilhas por tile) seguem campo de fluxo Dijkstra até alvos civis/som; pilhas do mesmo tipo se fundem.
 4. **Defesas** – Balistas disparam automaticamente; unidades ociosas em Torres de Vigia também.
 5. **Ataque/Infecção** – enxames atacam vizinhos (Cuspidores à distância); Tenda com HP 0 vira Casa Infectada que gera zumbis.
-6. **Fim de rodada** – produção de ouro, ondas programadas na borda anunciada, checagem de vitória.
+6. **Fim de rodada** – produção (Ouro de Tendas/CC, Madeira de Serrarias, Pedra de Extratores), ondas programadas na borda anunciada, checagem de vitória.
 
 ## Balanceamento (CSV)
 Os stats ficam em `data/` (um arquivo por categoria, uma linha por tipo, `id` como chave).
@@ -154,7 +170,7 @@ Edite no Excel/LibreOffice ou num editor de texto e **reinicie o jogo** para apl
 
 | Arquivo | Colunas principais |
 |---|---|
-| `data/buildings.csv` | `buildable` (aparece nos botões), custo `ap/gold/wood/stone`, `hp`, `noise` (ao construir), `gold_income`, `vision`, `build_radius` (território), `attack_range`/`damage`/`attack_noise` (defesa automática), `spawn` (Casa Infectada), `garrison`/`range_bonus`/`vision_bonus` (abrigo de unidade e bônus concedidos — Torre de Vigia) |
+| `data/buildings.csv` | `buildable` (aparece nos botões), custo `ap/gold/wood/stone`, `hp`, `noise` (ao construir), `gold_income`, `vision`, `build_radius` (território), `attack_range`/`damage`/`attack_noise` (defesa automática), `spawn` (Casa Infectada), `garrison`/`range_bonus`/`vision_bonus` (abrigo de unidade e bônus concedidos — Torre de Vigia), `harvest` (`wood`/`stone`)/`harvest_radius`/`harvest_tiles` (tiles por 1 recurso)/`harvest_max` (extratores) |
 | `data/units.csv` | `hp`, `move`, `attack_range`, `damage`, `noise` (ao atacar), `vision` |
 | `data/zombies.csv` | `hp` (por zumbi), `speed`, `attack` (dano por zumbi), `max_stack` (≤ 10), `attack_range`, `structure_mult`, `flying`, `hearing`, `color` (`#rrggbb`), `description` |
 | `data/crates.csv` | caixas de recursos: `weight` (raridade; 0 = só no editor), `gold`/`wood`/`stone` (conteúdo), `noise` (alarme ao abrir), `min_dist` (distância mínima do centro), `color` (#rrggbb). Quantidade e espaçamento: `CRATE_COUNT`/`CRATE_SPACING` em `config.py` |
@@ -174,7 +190,7 @@ Edite no Excel/LibreOffice ou num editor de texto e **reinicie o jogo** para apl
 - `game/stats.py` – leitura/validação dos CSVs
 - `game/config.py` – regras gerais, layout, cores
 - `game/grid.py` – `Grid`, `Tile`, `Terrain`, distâncias, BFS/Dijkstra
-- `game/entities.py` – `Building` (CC, Tenda, Muro, Balista, Tesla, Torre de Vigia, Casa Infectada), `Unit` (Soldado, Ranger), `ZombieSwarm` (tipado)
+- `game/entities.py` – `Building` (CC, Tenda, Muro, Balista, Tesla, Torre de Vigia, Serraria, Extrator de Pedra, Casa Infectada), `Unit` (Soldado, Ranger), `ZombieSwarm` (tipado)
 - `game/world.py` – regras e simulação (sem pygame)
 - `game/turns.py` – máquina de estados das fases
 - `game/renderer.py` – câmera (offset/zoom) e desenho

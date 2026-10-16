@@ -47,6 +47,10 @@ class BuildingStats:
     garrison: bool = False    # abriga 1 unidade (Torre de Vigia)
     range_bonus: int = 0      # bônus de alcance da unidade abrigada
     vision_bonus: int = 0     # bônus de visão da unidade abrigada
+    harvest: str = ""         # recurso extraído do terreno ao redor: wood (Floresta) / stone (Pedreira)
+    harvest_radius: int = 0   # raio (Chebyshev) dos tiles explorados
+    harvest_tiles: int = 0    # tiles necessários por 1 unidade de recurso/turno
+    harvest_max: int = 0      # produção máxima por turno
     notes: str = ""
 
     @property
@@ -135,7 +139,9 @@ def direction_token(text: str) -> "int | str | None":
 
 FREE_TEXT = {"notes", "description", "name", "symbol"}
 MIN_VALUES = {"swarms": 1, "size": 1, "hp": 1, "max_stack": 1, "attack_range": 0, "attack": 0, "structure_mult": 0}
-REQUIRED_BUILDINGS = {"hq", "tent", "wall", "ballista", "tesla", "watchtower", "infected"}
+REQUIRED_BUILDINGS = {"hq", "tent", "wall", "ballista", "tesla", "watchtower", "sawmill", "quarry",
+                      "infected"}
+HARVEST_KINDS = {"wood", "stone"}
 REQUIRED_UNITS = {"soldier", "ranger"}
 REQUIRED_ZOMBIES = {"walker"}  # gerado por Casas Infectadas
 TRUE = {"1", "true", "sim", "s", "yes", "y", "x"}
@@ -314,6 +320,11 @@ def load_stats(folder: Path = DATA_DIR) -> GameStats:
         raise StatsError(f"zombies.csv: tipos usados em START_SWARM_TYPES (config.py) não "
                          f"definidos: {', '.join(sorted(unknown))}.")
     waves = _check_waves(read_rows(folder / "waves.csv", WaveRow), zombies)
+    for b in buildings.values():
+        if b.harvest and (b.harvest not in HARVEST_KINDS or b.harvest_radius < 1
+                          or b.harvest_tiles < 1 or b.harvest_max < 1):
+            raise StatsError(f"buildings.csv: '{b.id}' tem harvest inválido (use wood/stone com "
+                             f"harvest_radius, harvest_tiles e harvest_max >= 1).")
     for kind in ("hq", "infected"):
         if buildings[kind].buildable:
             raise StatsError(f"buildings.csv: '{kind}' não pode ter buildable=1.")

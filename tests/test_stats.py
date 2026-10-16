@@ -14,7 +14,8 @@ class StatsFilesTest(unittest.TestCase):
         stats = load_stats(DATA_DIR)
         self.assertEqual(set(stats.units), {"soldier", "ranger"})
         self.assertIn("walker", stats.zombies)
-        self.assertEqual(set(BUILD_SPECS), {"wall", "tent", "ballista", "tesla", "watchtower"})
+        self.assertEqual(set(BUILD_SPECS), {"wall", "tent", "ballista", "tesla", "watchtower", "sawmill", "quarry"})
+        self.assertEqual((BUILDING_STATS["sawmill"].harvest, BUILDING_STATS["quarry"].harvest), ("wood", "stone"))
         tower = BUILDING_STATS["watchtower"]
         self.assertTrue(tower.garrison)
         self.assertGreater(tower.range_bonus, 0)
@@ -101,6 +102,11 @@ class StatsParsingTest(unittest.TestCase):
         with self.assertRaisesRegex(StatsError, "empty"):
             load_stats(self.tmp)
 
+    def test_bad_harvest_rejected(self):
+        self._edit("buildings.csv", ",wood,2,2,4,", ",ouro,2,2,4,")
+        with self.assertRaisesRegex(StatsError, "sawmill"):
+            load_stats(self.tmp)
+
     def test_crates_load(self):
         stats = load_stats(self.tmp)
         self.assertIn("supplies", stats.crates)
@@ -108,7 +114,7 @@ class StatsParsingTest(unittest.TestCase):
 
     def test_unknown_building_rejected(self):
         with (self.tmp / "buildings.csv").open("a", encoding="utf-8") as f:
-            f.write("castle,Castelo,K,1,5,0,0,0,30,0,0,0,0,0,0,0,0,0,0,0,\n")
+            f.write("castle,Castelo,K,1,5,0,0,0,30,0,0,0,0,0,0,0,0,0,0,0,,0,0,0,\n")
         with self.assertRaisesRegex(StatsError, "castle"):
             load_stats(self.tmp)
 
