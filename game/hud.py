@@ -107,7 +107,8 @@ class HUD:
         pygame.draw.line(surface, COLORS["hud_border"], self.rect.topleft, self.rect.bottomleft, 2)
         x = self.rect.x + 12
         y = self._line(surface, "THEY ARE THOUSANDS", (x, 10), 30, COLORS["title"])
-        y = self._line(surface, f"Turno {world.turn}/{MAX_TURNS}   Seed {world.seed}", (x, y), 22)
+        where = f"Mapa: {world.map_name}" if world.map_name else f"Seed {world.seed}"
+        y = self._line(surface, f"Turno {world.turn}/{MAX_TURNS}   {where}", (x, y), 22)
         phase_color = COLORS["text"] if turns.is_player_phase else COLORS["noise"]
         y = self._line(surface, f"Fase: {turns.phase.value}", (x, y), 22, phase_color)
 

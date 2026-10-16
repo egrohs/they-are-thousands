@@ -9,6 +9,8 @@ python main.py            # mapa aleatório
 python main.py --seed 42  # mapa determinístico
 python main.py --no-fog  # começa com névoa de guerra desligada
 python main.py --no-music  # começa sem trilha sonora
+python main.py --editor    # abre direto no editor de mapas
+python main.py --map maps/meu_mapa.json  # joga um mapa personalizado
 python -m unittest discover -s tests -t .
 ```
 
@@ -26,7 +28,23 @@ python -m unittest discover -s tests -t .
 | Botão direito | Cancela modo/seleção |
 | `Espaço` / botão | Encerrar turno |
 | WASD/Setas, botão do meio, roda | Câmera e zoom |
-| `Ctrl+R` (ou `R` no fim) | Novo mapa |
+| `Ctrl+R` (ou `R` no fim) | Reinicia (mesmo mapa personalizado, ou novo aleatório) |
+
+## Editor de mapas
+Menu → **Editor de Mapas** (`E`) ou `python main.py --editor`.
+- **Ferramentas** (painel lateral): terreno (Campo, Floresta, Pedreira, Água), construções
+  (CC, Tenda, Muro, Balista, Tesla, Casa Infectada), unidades (Soldado, Ranger), os 5 tipos de
+  zumbi e Borracha. Clique e **arraste** para pintar (ótimo para linhas de muro); botão direito apaga.
+- **Qtd** (`[` `]`): zumbis por enxame (limitado pela pilha máx. do tipo) e recurso do depósito.
+  **Pincel** (`B`): 1x1 ou 3x3 para terreno/borracha.
+- Sempre há exatamente 1 CC: colocar outro o move; ele não pode ser apagado nem ficar fora do Campo.
+  Construções transformam o tile em Campo; Água remove o que houver no tile.
+- `Ctrl+Z`/`Ctrl+Y` desfazer/refazer, **Vazio**/**Aleatório** criam um novo mapa base.
+- Clique no nome para renomear; **Salvar** (`Ctrl+S`) grava `maps/<nome>.json`; a lista de
+  mapas salvos no painel carrega com um clique.
+- **Jogar** (`F5`) inicia uma partida com o mapa atual. No menu, **Mapa: ...** alterna entre
+  Aleatório e os mapas salvos para a **Nova Partida**. Ondas e horda final continuam vindo das bordas.
+- Formato JSON documentado em `game/maps.py` (validado ao carregar, com mensagens de erro).
 
 ## Trilha sonora
 Todos os arquivos `.mp3/.ogg/.wav/.flac` em `assets/audio/music/` tocam em ordem alfabética,
@@ -90,5 +108,7 @@ Construa Teslas na borda para avançar; se uma Tesla cair, o território dela so
 - `game/fog.py` – névoa de guerra (visível/explorado)
 - `game/audio.py` – player da trilha sonora
 - `game/sprites.py` – carregamento/cache das imagens de unidades e construções
+- `game/maps.py` – formato JSON de mapas, validação, salvar/carregar (`maps/`)
+- `game/editor.py` – editor de mapas (`MapEditor` lógica + `EditorScreen` interface)
 - `game/menu.py` – menu inicial/pausa e configurações
 - `game/app.py` – loop principal e entrada

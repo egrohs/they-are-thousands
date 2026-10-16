@@ -15,6 +15,7 @@ class Settings:
     music_enabled: bool = True
     music_volume: float = 0.5
     music_available: bool = True
+    map_label: str = "Aleatório"
 
 
 @dataclass
@@ -25,8 +26,8 @@ class MenuItem:
 
 
 class Menu:
-    """Retorna ações: 'resume', 'new_game', 'toggle_fog', 'toggle_music',
-    'volume_up', 'volume_down', 'quit'."""
+    """Retorna ações: 'resume', 'new_game', 'cycle_map', 'cycle_map_back', 'open_editor',
+    'toggle_fog', 'toggle_music', 'volume_up', 'volume_down', 'quit'."""
 
     ITEM_W = 380
     ITEM_H = 44
@@ -53,7 +54,9 @@ class Menu:
             music = "INDISPONÍVEL"
         entries = [
             ("resume", "Continuar" if self.started else "Iniciar Jogo"),
-            ("new_game", "Novo Mapa"),
+            ("new_game", "Nova Partida"),
+            ("map", f"Mapa: {settings.map_label}  [clique]"),
+            ("open_editor", "Editor de Mapas  [E]"),
             ("toggle_fog", f"Névoa de Guerra: {fog}  [F]"),
             ("toggle_music", f"Música: {music}  [M]"),
             ("volume", f"Volume: {round(settings.music_volume * 100)}%  [< / >]"),
@@ -77,7 +80,7 @@ class Menu:
                 self.focus = (self.focus + 1) % len(items)
             elif event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
                 action = items[self.focus].action
-                return "volume_up" if action == "volume" else action
+                return {"volume": "volume_up", "map": "cycle_map"}.get(action, action)
             elif event.key in (pygame.K_LEFT, pygame.K_a, pygame.K_MINUS, pygame.K_KP_MINUS):
                 return "volume_down"
             elif event.key in (pygame.K_RIGHT, pygame.K_d, pygame.K_EQUALS, pygame.K_PLUS,
@@ -89,6 +92,8 @@ class Menu:
                 return "toggle_fog"
             elif event.key == pygame.K_m:
                 return "toggle_music"
+            elif event.key == pygame.K_e:
+                return "open_editor"
         elif event.type == pygame.MOUSEMOTION:
             for i, item in enumerate(items):
                 if item.rect.collidepoint(event.pos):
@@ -99,6 +104,8 @@ class Menu:
                     if item.action == "volume":
                         left_half = event.pos[0] < item.rect.centerx
                         return "volume_down" if left_half or event.button == 3 else "volume_up"
+                    if item.action == "map":
+                        return "cycle_map_back" if event.button == 3 else "cycle_map"
                     if event.button == 1:
                         return item.action
         return None

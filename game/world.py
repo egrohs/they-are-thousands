@@ -37,10 +37,17 @@ class Effect:
 
 
 class World:
-    def __init__(self, seed: Optional[int] = None, fog_enabled: bool = FOW_ENABLED_DEFAULT):
+    def __init__(self, seed: Optional[int] = None, fog_enabled: bool = FOW_ENABLED_DEFAULT,
+                 map_data: Optional[dict] = None):
         self.seed = seed if seed is not None else random.randrange(1_000_000)
         self.rng = random.Random(self.seed)
-        self.grid = Grid(GRID_W, GRID_H)
+        self.map_name: Optional[str] = None
+        if map_data is not None:
+            from .maps import build_grid  # import local: maps depende de entities/grid
+            self.grid, self.hq = build_grid(map_data)
+            self.map_name = str(map_data.get("name", "Personalizado"))
+        else:
+            self.grid = Grid(GRID_W, GRID_H)
         self.fog = FogOfWar(self.grid, fog_enabled)
         self.resources: dict[str, int] = dict(START_RESOURCES)
         self.ap = AP_PER_TURN
@@ -54,10 +61,13 @@ class World:
         self.victory = False
         self.final_horde_spawned = False
         self.zombies_killed = 0
-        self.hq: CommandCenter
-        self._generate_map()
+        if map_data is None:
+            self._generate_map()
         self.begin_player_phase()
-        self.message(f"Semente do mapa: {self.seed}. Sobreviva {MAX_TURNS} turnos!")
+        if self.map_name:
+            self.message(f"Mapa: {self.map_name}. Sobreviva {MAX_TURNS} turnos!")
+        else:
+            self.message(f"Semente do mapa: {self.seed}. Sobreviva {MAX_TURNS} turnos!")
 
     # ======================================================================
     # Utilidades

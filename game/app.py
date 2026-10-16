@@ -2,14 +2,17 @@
 from __future__ import annotations
 
 from typing import Optional
+from pathlib import Path
 
 import pygame
 
 from .config import (BUILD_SPECS, CAMERA_PAN_SPEED, COLORS, FOW_ENABLED_DEFAULT, FPS, GRID_H,
                      GRID_W, HUD_W, MUSIC_VOLUME_STEP, VIEW_H, VIEW_W, WINDOW_H, WINDOW_W)
 from .audio import MusicPlayer
+from .editor import EditorScreen
 from .grid import Pos
 from .hud import HUD
+from .maps import MapError, list_maps, load_map
 from .menu import Menu, Settings
 from .renderer import Camera, Renderer, UIState
 from .turns import TurnManager
@@ -17,11 +20,13 @@ from .world import World
 
 MODE_KEYS = {pygame.K_1: "wall", pygame.K_2: "tent", pygame.K_3: "ballista", pygame.K_4: "repair",
              pygame.K_5: "tesla"}
+RANDOM_MAP_LABEL = "Aleatório"
 
 
 class GameApp:
     def __init__(self, seed: Optional[int] = None, fog_enabled: bool = FOW_ENABLED_DEFAULT,
-                 show_menu: bool = True, music_enabled: bool = True):
+                 show_menu: bool = True, music_enabled: bool = True,
+                 map_data: Optional[dict] = None, start_in_editor: bool = False):
         pygame.init()
         pygame.display.set_caption("They Are Thousands - Protótipo Tático")
         self.screen = pygame.display.set_mode((WINDOW_W, WINDOW_H))
@@ -35,17 +40,65 @@ class GameApp:
         self.settings.music_available = self.music.can_play
         self.music.start()
         self.menu = Menu(self.screen.get_rect())
-        self.menu.open = show_menu
+        self.menu.open = show_menu and not start_in_editor
         self.menu.started = not show_menu
         self.running = True
         self._drag_origin: Optional[tuple[int, int]] = None
+        self.map_data: Optional[dict] = None
+        self._map_index = 0
+        self.set_map(map_data)
+        self.editor: Optional[EditorScreen] = None
+        self.in_editor = False
         self.new_game(seed)
+        if start_in_editor:
+            self.open_editor()
 
     def new_game(self, seed: Optional[int] = None) -> None:
-        self.world = World(seed, fog_enabled=self.settings.fog_enabled)
+        self.world = World(seed, fog_enabled=self.settings.fog_enabled, map_data=self.map_data)
         self.turns = TurnManager(self.world)
         self.camera = Camera(self.viewport, GRID_W, GRID_H)
         self.ui = UIState()
+
+    def set_map(self, data: Optional[dict]) -> None:
+        """Define o mapa das próximas partidas (None = gerado aleatoriamente)."""
+        self.map_data = data
+        self.settings.map_label = str(data.get("name", "?")) if data else RANDOM_MAP_LABEL
+
+    def cycle_map(self, step: int) -> None:
+        options: list[Optional[Path]] = [None, *list_maps()]
+        for _ in range(len(options)):
+            self._map_index = (self._map_index + step) % len(options)
+            path = options[self._map_index]
+            if path is None:
+                self.set_map(None)
+                return
+            try:
+                self.set_map(load_map(path))
+                return
+            except MapError as exc:
+                self.world.message(str(exc))
+
+    # --- editor ------------------------------------------------------------
+    def open_editor(self) -> None:
+        if self.editor is None:
+            self.editor = EditorScreen(self.viewport, self.hud.rect, self.renderer,
+                                       on_play=self._play_from_editor, on_exit=self._exit_editor)
+        else:
+            self.editor.refresh_maps()
+        self.cancel()
+        self.menu.open = False
+        self.in_editor = True
+
+    def _play_from_editor(self, data: dict) -> None:
+        self.set_map(data)
+        self.new_game()
+        self.in_editor = False
+        self.menu.open = False
+        self.menu.started = True
+
+    def _exit_editor(self) -> None:
+        self.in_editor = False
+        self.open_menu()
 
     def set_fog(self, enabled: bool) -> None:
         self.settings.fog_enabled = enabled
@@ -66,6 +119,10 @@ class GameApp:
             self.new_game()
             self.menu.open = False
             self.menu.started = True
+        elif action in ("cycle_map", "cycle_map_back"):
+            self.cycle_map(1 if action == "cycle_map" else -1)
+        elif action == "open_editor":
+            self.open_editor()
         elif action == "toggle_fog":
             self.set_fog(not self.settings.fog_enabled)
         elif action == "toggle_music":
@@ -109,6 +166,8 @@ class GameApp:
             action = self.menu.handle_event(event, self.settings)
             if action is not None:
                 self._on_menu_action(action)
+        elif self.in_editor and self.editor is not None:
+            self.editor.handle_event(event)
         elif event.type == pygame.KEYDOWN:
             self._on_key(event)
         elif event.type == pygame.MOUSEWHEEL:
@@ -214,6 +273,9 @@ class GameApp:
     def update(self, dt: float) -> None:
         if self.menu.open:
             return
+        if self.in_editor and self.editor is not None:
+            self.editor.update(dt, CAMERA_PAN_SPEED)
+            return
         keys = pygame.key.get_pressed()
         dx = (keys[pygame.K_d] or keys[pygame.K_RIGHT]) - (keys[pygame.K_a] or keys[pygame.K_LEFT])
         dy = (keys[pygame.K_s] or keys[pygame.K_DOWN]) - (keys[pygame.K_w] or keys[pygame.K_UP])
@@ -238,10 +300,13 @@ class GameApp:
 
     def draw(self) -> None:
         self.screen.fill(COLORS["bg"])
-        self.renderer.draw(self.screen, self.world, self.camera, self.ui)
-        self.hud.draw(self.screen, self.world, self.turns, self.ui, pygame.mouse.get_pos())
-        if self.world.game_over and not self.turns.busy:
-            self._draw_game_over()
+        if self.in_editor and self.editor is not None:
+            self.editor.draw(self.screen, pygame.mouse.get_pos())
+        else:
+            self.renderer.draw(self.screen, self.world, self.camera, self.ui)
+            self.hud.draw(self.screen, self.world, self.turns, self.ui, pygame.mouse.get_pos())
+            if self.world.game_over and not self.turns.busy:
+                self._draw_game_over()
         if self.menu.open:
             self.menu.draw(self.screen, self.settings,
                            self.music.current_track if self.music.playing else None)

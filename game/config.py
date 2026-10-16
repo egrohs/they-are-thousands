@@ -12,6 +12,9 @@ MUSIC_VOLUME_DEFAULT = 0.5
 MUSIC_VOLUME_STEP = 0.1
 MUSIC_FADE_MS = 1500
 
+# --- Mapas personalizados -----------------------------------------------------
+MAPS_DIR = ASSETS_DIR.parent / "maps"
+
 # --- Sprites ----------------------------------------------------------------
 IMAGES_DIR = ASSETS_DIR / "images"
 # chave -> (arquivo, âncora vertical do recorte: 0 = topo, 0.5 = centro)

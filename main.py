@@ -1,9 +1,11 @@
-"""Ponto de entrada: python main.py [--seed N]"""
+"""Ponto de entrada: python main.py [--seed N] [--map arquivo.json] [--editor]"""
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from game.app import GameApp
+from game.maps import MapError, load_map
 
 
 def main() -> None:
@@ -11,10 +13,18 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=None, help="semente do mapa (determinístico)")
     parser.add_argument("--no-fog", action="store_true", help="inicia com a névoa de guerra desligada")
     parser.add_argument("--no-music", action="store_true", help="inicia com a trilha sonora desligada")
+    parser.add_argument("--map", type=str, default=None, help="arquivo .json de mapa personalizado")
+    parser.add_argument("--editor", action="store_true", help="abre direto no editor de mapas")
     parser.add_argument("--frames", type=int, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args()
-    GameApp(seed=args.seed, fog_enabled=not args.no_fog,
-            music_enabled=not args.no_music).run(max_frames=args.frames)
+    map_data = None
+    if args.map:
+        try:
+            map_data = load_map(Path(args.map))
+        except MapError as exc:
+            parser.error(str(exc))
+    GameApp(seed=args.seed, fog_enabled=not args.no_fog, music_enabled=not args.no_music,
+            map_data=map_data, start_in_editor=args.editor).run(max_frames=args.frames)
 
 
 if __name__ == "__main__":
