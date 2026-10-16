@@ -471,6 +471,44 @@ class FogTests(unittest.TestCase):
         self.world.update_fog()
         self.assertTrue(old <= self.world.fog.explored)
 
+    def test_darkness_layer_hides_far_explored_tiles(self):
+        fog = self.world.fog
+        far = (0, 0)
+        fog.explored.add(far)
+        fog.update()
+        self.assertTrue(fog.is_explored(far))
+        self.assertFalse(fog.is_known(far))
+        self.assertTrue(fog.is_dark(far))
+        # memória: explorado, fora da visão, mas a até visão + margem de um aliado
+        sx, sy = self.soldier.pos
+        r = FogOfWar.vision_of(self.soldier)
+        for u in list(self.world.grid.units()):
+            if u is not self.soldier:
+                self.world.grid.remove_unit(u)
+        for b in list(self.world.grid.buildings()):
+            self.world.grid.remove_building(b)
+        near = (sx + r + 1, sy)
+        fog.explored.add(near)
+        fog.update()
+        self.assertFalse(fog.is_visible(near))
+        self.assertTrue(fog.is_known(near))
+        self.assertFalse(fog.is_dark(near))
+        # unidade se afasta: o tile cai na escuridão; volta e ele reaparece
+        self.world.grid.remove_unit(self.soldier)
+        fog.update()
+        self.assertTrue(fog.is_dark(near))
+        self.world.grid.place_unit(self.soldier)
+        fog.update()
+        self.assertTrue(fog.is_known(near))
+
+    def test_darkness_disabled_with_fog(self):
+        fog = self.world.fog
+        fog.explored.add((0, 0))
+        fog.update()
+        fog.enabled = False
+        self.assertFalse(fog.is_dark((0, 0)))
+        self.assertTrue(fog.is_known((0, 0)))
+
 
 class TurnFlowTests(unittest.TestCase):
     def test_full_game_runs_to_completion_deterministically(self):

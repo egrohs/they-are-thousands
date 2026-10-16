@@ -179,7 +179,9 @@ class HUD:
             lines.append((f"Mov {u.move_range}{' (usado)' if u.moved else ''} | Alc {world.unit_range(u)}"
                           f" | Dano {u.damage} | Ruído {u.noise}"
                           f"{' | agiu' if u.acted else ''}", COLORS["text_dim"]))
-        if pos is not None and not world.fog.is_explored(pos):
+        if pos is not None and world.fog.is_dark(pos):
+            lines.append((f"Tile {pos}: Escuridão - nenhum aliado por perto", COLORS["text_dim"]))
+        elif pos is not None and not world.fog.is_explored(pos):
             lines.append((f"Tile {pos}: Inexplorado", COLORS["text_dim"]))
         elif pos is not None:
             t = world.grid.tile(pos)

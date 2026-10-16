@@ -186,11 +186,11 @@ class Renderer:
 
         fog = world.fog
         for t in visible:
-            if t.crate and t.unit is None and fog.is_explored(t.pos):
+            if t.crate and t.unit is None and fog.is_known(t.pos):
                 self._draw_crate(surface, cam.tile_rect(t.pos), t.crate, ts)
         for t in visible:
             rect = cam.tile_rect(t.pos)
-            if t.building is not None:
+            if t.building is not None and fog.is_known(t.pos):
                 self._draw_building(surface, rect, t.building, ts)
             if t.unit is not None:
                 urect = rect
@@ -296,8 +296,11 @@ class Renderer:
             if t.pos in fog.visible:
                 continue
             rect = cam.tile_rect(t.pos)
-            if t.pos in fog.explored:
+            if fog.is_known(t.pos):
                 self._overlay(surface, rect, COLORS["fog_explored"], 150)
+            elif t.pos in fog.explored:  # escuridão: oculta tudo, só um quadriculado tênue
+                pygame.draw.rect(surface, COLORS["fog_dark"], rect)
+                pygame.draw.rect(surface, COLORS["fog_unexplored"], rect, 1)
             else:
                 pygame.draw.rect(surface, COLORS["fog_unexplored"], rect)
 

@@ -89,11 +89,18 @@ partida (determinísticos pela seed), então dá para se preparar:
 
 ## Névoa de guerra (FOW)
 Adaptada de *They Are Billions*; liga/desliga pelo menu inicial/pausa ou `F`, a qualquer momento.
-- **Inexplorado** (preto): nada é conhecido. **Explorado** (escurecido): terreno e construções
-  ficam na memória, mas zumbis não aparecem. **Visível**: raio circular de visão aliado
-  (CC 6, Ranger 6, Balista 5, Soldado 4, Tesla 4, Tenda 3, Muro 2).
+- Quatro camadas:
+  - **Inexplorado** (preto): nada é conhecido.
+  - **Escuridão** (preto azulado): já explorado, mas **sem unidade/construção aliada por perto**
+    (além de visão + 3 tiles, `FOG_MEMORY_MARGIN` em `config.py`). Oculta **tudo**: terreno,
+    recursos, construções (inclusive Casas Infectadas), caixas e zumbis. Reaparece quando um
+    aliado volta para perto.
+  - **Memória** (escurecido): explorado e perto de aliados; terreno, construções e caixas
+    aparecem, mas zumbis não.
+  - **Visível**: raio circular de visão aliado
+    (CC 6, Ranger 6, Balista 5, Soldado 4, Tesla 4, Tenda 3, Muro 2).
 - Só é possível atacar (unidades e Balistas) enxames visíveis; o HUD mostra apenas zumbis à vista.
-- Movimentos podem atravessar a névoa: se um enxame oculto ou terreno desconhecido bloquear o
+- Movimentos podem atravessar a névoa: se um enxame oculto ou terreno desconhecido (inexplorado/escuridão) bloquear o
   caminho, a unidade para antes (**emboscada**) e perde o movimento.
 
 ## Território

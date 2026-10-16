@@ -153,7 +153,7 @@ class World:
         return unit.attack_range + (shelter.range_bonus if shelter else 0)
 
     def _can_enter_shelter(self, pos: Pos) -> bool:
-        if not self.fog.is_explored(pos):
+        if not self.fog.is_known(pos):
             return False
         tile = self.grid.tile(pos)
         b = tile.building
@@ -378,7 +378,7 @@ class World:
     # ======================================================================
     def _unit_passable(self, pos: Pos) -> bool:
         """Passabilidade segundo o conhecimento do jogador (névoa esconde enxames/terreno)."""
-        if not self.fog.is_explored(pos):
+        if not self.fog.is_known(pos):
             return True
         tile = self.grid.tile(pos)
         if not tile.terrain.passable or tile.building is not None or tile.unit is not None:

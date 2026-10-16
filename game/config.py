@@ -80,6 +80,10 @@ WAVE_WARNING_TURNS = 3  # o indicador no mapa aparece a partir de N turnos antes
 # tipos dos enxames iniciais espalhados pelo mapa (sorteio ponderado)
 START_SWARM_TYPES = (("walker", 4), ("runner", 1))
 
+# névoa: tiles explorados só ficam na memória (terreno/construções/caixas) até
+# visão + FOG_MEMORY_MARGIN tiles de alguma unidade/construção aliada; além disso, escuridão total
+FOG_MEMORY_MARGIN = 3
+
 # caixas de recursos (tipos em data/crates.csv): espalhadas fora da base nos mapas aleatórios
 CRATE_COUNT = 7
 CRATE_SPACING = 3       # distância Chebyshev mínima entre caixas
@@ -116,6 +120,7 @@ COLORS: dict[str, tuple[int, int, int]] = {
     "territory": (120, 200, 255),
     "fog_unexplored": (6, 6, 9),
     "fog_explored": (10, 10, 18),
+    "fog_dark": (17, 17, 26),
     "menu_bg": (12, 12, 16),
     "infected": (120, 180, 40),
     "soldier": (60, 140, 235),

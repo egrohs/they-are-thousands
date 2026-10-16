@@ -1,7 +1,12 @@
 """Névoa de guerra (FOW) adaptada de They Are Billions.
 
+Quatro camadas:
+
 * Inexplorado: preto; o jogador não sabe nada sobre o tile.
-* Explorado: terreno e construções permanecem visíveis (memória), mas zumbis ficam ocultos.
+* Escuridão: já explorado, mas sem nenhuma unidade/construção aliada por perto
+  (além de visão + `FOG_MEMORY_MARGIN`): oculta tudo — terreno, construções, caixas e zumbis.
+* Memória: explorado e perto de aliados; terreno, construções e caixas aparecem
+  esmaecidos, mas zumbis ficam ocultos.
 * Visível: dentro do raio de visão de alguma unidade/construção aliada.
 
 A exploração é sempre registrada, mesmo com a névoa desligada, para que ligá-la
@@ -11,6 +16,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .config import FOG_MEMORY_MARGIN
 from .grid import Grid, Pos
 from .stats import VISION_RADIUS
 
@@ -30,7 +36,9 @@ class FogOfWar:
         self.grid = grid
         self.enabled = enabled
         self.visible: set[Pos] = set()
-        self.explored: set[Pos] = set()
+        self.explored: set[Pos] = set()   # histórico: já foi visto alguma vez
+        self.nearby: set[Pos] = set()     # alcance de memória (visão + margem) dos aliados
+        self.margin = FOG_MEMORY_MARGIN
 
     @staticmethod
     def vision_of(entity: "Building | Unit") -> int:
@@ -38,6 +46,7 @@ class FogOfWar:
 
     def update(self) -> None:
         visible: set[Pos] = set()
+        nearby: set[Pos] = set()
         sources: list = [b for b in self.grid.buildings() if b.alive and not b.hostile]
         sources += [u for u in self.grid.units() if u.alive]
         for e in sources:
@@ -47,11 +56,22 @@ class FogOfWar:
                 r = max(r, VISION_RADIUS.get(shelter.kind, 0)) + shelter.vision_bonus
             if r > 0:
                 visible.update(vision_tiles(self.grid, e.pos, r))
+            nearby.update(vision_tiles(self.grid, e.pos, r + self.margin))
         self.visible = visible
+        self.nearby = nearby
         self.explored |= visible
 
     def is_visible(self, pos: Pos) -> bool:
         return not self.enabled or pos in self.visible
 
     def is_explored(self, pos: Pos) -> bool:
+        """Já foi visto alguma vez (histórico, inclui tiles hoje na escuridão)."""
         return not self.enabled or pos in self.explored
+
+    def is_known(self, pos: Pos) -> bool:
+        """O jogador enxerga o tile agora: visível ou na memória (explorado e perto de aliados)."""
+        return not self.enabled or pos in self.visible or (pos in self.explored and pos in self.nearby)
+
+    def is_dark(self, pos: Pos) -> bool:
+        """Explorado, mas longe de qualquer aliado: tudo oculto."""
+        return self.enabled and pos in self.explored and not self.is_known(pos)
