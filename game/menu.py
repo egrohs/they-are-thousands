@@ -6,7 +6,10 @@ from typing import Optional
 
 import pygame
 
-from .config import COLORS
+from .config import COLORS, NET_DEFAULT_ADDRESS, NET_PORT
+
+ADDRESS_CHARS = set("0123456789.:-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+ADDRESS_MAX = 60
 
 
 @dataclass
@@ -16,6 +19,10 @@ class Settings:
     music_volume: float = 0.5
     music_available: bool = True
     map_label: str = "Aleatório"
+    join_address: str = NET_DEFAULT_ADDRESS
+    net_role: str = "local"     # "local" | "host" | "client"
+    net_info: str = ""
+    net_error: str = ""
 
 
 @dataclass
@@ -27,7 +34,8 @@ class MenuItem:
 
 class Menu:
     """Retorna ações: 'resume', 'new_game', 'cycle_map', 'cycle_map_back', 'open_editor',
-    'toggle_fog', 'toggle_music', 'volume_up', 'volume_down', 'quit'."""
+    'host', 'join', 'stop_net', 'toggle_fog', 'toggle_music', 'volume_up', 'volume_down', 'quit'.
+    Com o item "Entrar no IP" em foco, o teclado digita o endereço."""
 
     ITEM_W = 380
     ITEM_H = 44
@@ -54,8 +62,18 @@ class Menu:
             music = "INDISPONÍVEL"
         entries = [
             ("resume", "Continuar" if self.started else "Iniciar Jogo"),
-            ("new_game", "Nova Partida"),
+            ("new_game", "Nova Partida" if settings.net_role != "client"
+             else "Nova Partida (só o anfitrião)"),
             ("map", f"Mapa: {settings.map_label}  [clique]"),
+        ]
+        if settings.net_role == "local":
+            cursor = "_" if self.focused_action() == "join" else ""
+            entries += [("host", f"Hospedar Co-op  [porta {NET_PORT}]"),
+                        ("join", f"Entrar no IP: {settings.join_address}{cursor}")]
+        else:
+            entries.append(("stop_net", "Encerrar Co-op (hospedagem)" if settings.net_role == "host"
+                            else "Desconectar do anfitrião"))
+        entries += [
             ("open_editor", "Editor de Mapas  [E]"),
             ("toggle_fog", f"Névoa de Guerra: {fog}  [F]"),
             ("toggle_music", f"Música: {music}  [M]"),
@@ -71,8 +89,21 @@ class Menu:
         self.focus %= len(self.items)
         return self.items
 
+    def focused_action(self) -> Optional[str]:
+        if not self.items:
+            return None
+        return self.items[self.focus % len(self.items)].action
+
     def handle_event(self, event: pygame.event.Event, settings: Settings) -> Optional[str]:
         items = self.layout(settings)
+        if event.type == pygame.KEYDOWN and items[self.focus].action == "join":
+            if event.key == pygame.K_BACKSPACE:
+                settings.join_address = settings.join_address[:-1]
+                return None
+            if (event.unicode and event.unicode in ADDRESS_CHARS
+                    and len(settings.join_address) < ADDRESS_MAX):
+                settings.join_address += event.unicode
+                return None
         if event.type == pygame.KEYDOWN:
             if event.key in (pygame.K_UP, pygame.K_w):
                 self.focus = (self.focus - 1) % len(items)
@@ -120,6 +151,8 @@ class Menu:
         title = self.font(72).render("THEY ARE THOUSANDS", True, COLORS["title"])
         surface.blit(title, title.get_rect(center=(cx, items[0].rect.top - 110)))
         sub = "Pausado" if self.started else "Sobreviva 15 turnos à horda"
+        if settings.net_role != "local":
+            sub = "Co-op: a partida continua enquanto o menu está aberto"
         img = self.font(28).render(sub, True, COLORS["text_dim"])
         surface.blit(img, img.get_rect(center=(cx, items[0].rect.top - 60)))
         for i, item in enumerate(items):
@@ -143,7 +176,14 @@ class Menu:
             surface.blit(label, label.get_rect(center=item.rect.center))
         hint = ("Névoa: inexplorado fica preto; áreas exploradas fora da visão escondem os "
                 "zumbis. Pode ser alterada a qualquer momento.")
-        img = self.font(20).render(hint, True, COLORS["text_dim"])
+        hint_color = COLORS["text_dim"]
+        if settings.net_error:
+            hint, hint_color = settings.net_error, COLORS["defeat"]
+        elif settings.net_info:
+            hint, hint_color = settings.net_info, COLORS["territory"]
+        elif self.focused_action() == "join":
+            hint = "Digite o IP do anfitrião (ex.: 192.168.0.10 ou 192.168.0.10:5757) e tecle Enter."
+        img = self.font(20).render(hint, True, hint_color)
         surface.blit(img, img.get_rect(center=(cx, items[-1].rect.bottom + 30)))
         if now_playing:
             img = self.font(22).render(f"Tocando: {now_playing}", True, COLORS["text_dim"])

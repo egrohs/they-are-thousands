@@ -7,14 +7,17 @@ from pathlib import Path
 import pygame
 
 from .config import (CAMERA_PAN_SPEED, COLORS, FOW_ENABLED_DEFAULT, FPS, GRID_H,
-                     GRID_W, HUD_W, MUSIC_VOLUME_STEP, VIEW_H, VIEW_W, WINDOW_H, WINDOW_W)
+                     GRID_W, HUD_W, MUSIC_VOLUME_STEP, NET_PORT, VIEW_H, VIEW_W, WINDOW_H,
+                     WINDOW_W)
 from .stats import BUILD_SPECS
 from .audio import MusicPlayer
+from .coop import ClientSession, GameSetup, HostSession, Session
 from .editor import EditorScreen
 from .grid import Pos
 from .hud import HUD
 from .maps import MapError, list_maps, load_map
 from .menu import Menu, Settings
+from .net import NetError, local_ip
 from .renderer import Camera, Renderer, UIState
 from .turns import TurnManager
 from .world import World
@@ -51,15 +54,91 @@ class GameApp:
         self.set_map(map_data)
         self.editor: Optional[EditorScreen] = None
         self.in_editor = False
-        self.new_game(seed)
+        self.camera = Camera(self.viewport, GRID_W, GRID_H)
+        self.ui = UIState()
+        self._local_ip = ""
+        self.session: Session = Session(GameSetup.new(seed, self.settings.fog_enabled, self.map_data))
+        self._generation = self.session.generation
         if start_in_editor:
             self.open_editor()
 
-    def new_game(self, seed: Optional[int] = None) -> None:
-        self.world = World(seed, fog_enabled=self.settings.fog_enabled, map_data=self.map_data)
-        self.turns = TurnManager(self.world)
-        self.camera = Camera(self.viewport, GRID_W, GRID_H)
-        self.ui = UIState()
+    # --- sessão (local ou co-op) ------------------------------------------------
+    @property
+    def world(self) -> World:
+        return self.session.world
+
+    @property
+    def turns(self) -> TurnManager:
+        return self.session.turns
+
+    def new_game(self, seed: Optional[int] = None) -> bool:
+        setup = GameSetup.new(seed, self.settings.fog_enabled, self.map_data)
+        if not self.session.new_game(setup):
+            self.world.message("Co-op: somente o anfitrião pode iniciar uma nova partida.")
+            return False
+        self._sync_session()
+        return True
+
+    def _sync_session(self) -> None:
+        """Partida reconstruída (nova, ressincronizada, hospedada...): reseta a UI local."""
+        session = self.session
+        if session.generation != self._generation:
+            self._generation = session.generation
+            self.ui = UIState()
+            if session.new_game_started:
+                self.camera = Camera(self.viewport, GRID_W, GRID_H)
+        self.settings.fog_enabled = self.world.fog.enabled
+        self.settings.net_role = session.role
+        if session.role == "host":
+            assert isinstance(session, HostSession)
+            n = len(session.player_ids)
+            self.settings.net_info = (f"Hospedando: amigos entram em {self._local_ip}:{session.port}"
+                                      f"  ({n} jogador(es))")
+        elif session.role == "client":
+            assert isinstance(session, ClientSession)
+            self.settings.net_info = (f"Conectado a {session.host}:{session.port} como "
+                                      f"P{session.player_id} ({len(session.player_ids)} jogador(es))")
+        else:
+            self.settings.net_info = ""
+
+    def start_host(self, port: int = NET_PORT) -> bool:
+        if self.session.online:
+            return False
+        try:
+            self.session = HostSession(self.session.setup, port, adopt=self.session)
+        except NetError as exc:
+            self.settings.net_error = str(exc)
+            return False
+        self._local_ip = local_ip()
+        self.settings.net_error = ""
+        self._sync_session()
+        return True
+
+    def join(self, address: str) -> bool:
+        if self.session.online:
+            return False
+        try:
+            session = ClientSession(address)
+        except NetError as exc:
+            self.settings.net_error = str(exc)
+            return False
+        self.session = session
+        self.settings.net_error = ""
+        self.menu.open = False
+        self.menu.started = True
+        self._sync_session()
+        return True
+
+    def leave_network(self) -> None:
+        if not self.session.online:
+            return
+        self.session.close()
+        self.session = Session.detached(self.session)
+        self._sync_session()
+
+    def submit(self, cmd: dict) -> None:
+        self.session.submit(cmd)
+        self._sync_session()
 
     def set_map(self, data: Optional[dict]) -> None:
         """Define o mapa das próximas partidas (None = gerado aleatoriamente)."""
@@ -103,24 +182,32 @@ class GameApp:
         self.open_menu()
 
     def set_fog(self, enabled: bool) -> None:
-        self.settings.fog_enabled = enabled
-        self.world.fog.enabled = enabled
-        self.world.update_fog()
+        # comando de jogo: no co-op a névoa é compartilhada (afeta regras como emboscadas)
+        self.submit({"op": "fog", "enabled": enabled})
 
     def open_menu(self) -> None:
         self.cancel()
         self._drag_origin = None
         self.menu.open = True
         self.menu.focus = 0
+        self.settings.net_error = ""
 
     def _on_menu_action(self, action: str) -> None:
         if action == "resume":
             self.menu.open = False
             self.menu.started = True
         elif action == "new_game":
-            self.new_game()
-            self.menu.open = False
-            self.menu.started = True
+            if self.new_game():
+                self.menu.open = False
+                self.menu.started = True
+            else:
+                self.settings.net_error = "Somente o anfitrião pode iniciar uma nova partida."
+        elif action == "host":
+            self.start_host()
+        elif action == "join":
+            self.join(self.settings.join_address)
+        elif action == "stop_net":
+            self.leave_network()
         elif action in ("cycle_map", "cycle_map_back"):
             self.cycle_map(1 if action == "cycle_map" else -1)
         elif action == "open_editor":
@@ -156,6 +243,7 @@ class GameApp:
             frames += 1
             if max_frames is not None and frames >= max_frames:
                 break
+        self.session.close()
         pygame.quit()
 
     # ------------------------------------------------------------------
@@ -226,14 +314,13 @@ class GameApp:
         self.ui.selected_unit = None
 
     def undo(self) -> None:
-        if not self.turns.is_player_phase:
-            return
-        if self.world.undo():
-            # unidades restauradas são novas instâncias: a seleção antiga ficaria órfã
-            self.ui.selected_unit = None
+        if self.turns.is_player_phase:
+            # unidades restauradas são novas instâncias: update() limpa a seleção órfã
+            self.submit({"op": "undo"})
 
     def end_turn(self) -> None:
-        if self.turns.end_player_turn():
+        if self.turns.is_player_phase and not self.world.game_over:
+            self.submit({"op": "end_turn"})
             self.cancel()
 
     def _on_left_click(self, pos: tuple[int, int]) -> None:
@@ -260,34 +347,48 @@ class GameApp:
         tile = world.grid.tile(pos)
 
         if self.ui.mode in BUILD_SPECS:
-            world.build(self.ui.mode, pos)
+            self.submit({"op": "build", "kind": self.ui.mode, "pos": list(pos)})
             return
         if self.ui.mode == "repair":
-            world.repair(pos)
+            self.submit({"op": "repair", "pos": list(pos)})
             return
 
         unit = self.ui.selected_unit
         if unit is not None:
+            op = None
             if tile.unit is not None:
                 self.ui.selected_unit = None if tile.unit is unit else tile.unit
             elif pos in world.attack_targets(unit):
-                world.unit_attack(unit, pos)
+                op = "attack"
             elif pos in world.gather_targets(unit):
-                world.unit_gather(unit, pos)
+                op = "gather"
             elif pos in world.unit_moves(unit):
-                world.move_unit(unit, pos)
+                op = "move"
             else:
                 self.ui.selected_unit = None
+            if op is not None:
+                self.submit({"op": op, "from": list(unit.pos), "to": list(pos)})
             return
         if tile.unit is not None:
             self.ui.selected_unit = tile.unit
 
     # ------------------------------------------------------------------
     def update(self, dt: float) -> None:
-        if self.menu.open:
-            return
-        if self.in_editor and self.editor is not None:
-            self.editor.update(dt, CAMERA_PAN_SPEED)
+        session = self.session
+        paused = self.menu.open or self.in_editor
+        if session.online or not paused:  # no co-op a partida não pausa no menu/editor
+            session.update(dt)
+        if session.online and not session.connected:
+            self.leave_network()
+            self.settings.net_error = "Conexão com o anfitrião perdida."
+        self._sync_session()
+        ui = self.ui
+        ui.net_status = self.session.status
+        ui.peer_cursors = self.session.peer_cursors
+        if paused:
+            self.session.send_cursor(None)
+            if self.in_editor and self.editor is not None and not self.menu.open:
+                self.editor.update(dt, CAMERA_PAN_SPEED)
             return
         keys = pygame.key.get_pressed()
         dx = (keys[pygame.K_d] or keys[pygame.K_RIGHT]) - (keys[pygame.K_a] or keys[pygame.K_LEFT])
@@ -295,14 +396,13 @@ class GameApp:
         if dx or dy:
             self.camera.pan(dx * CAMERA_PAN_SPEED * dt, dy * CAMERA_PAN_SPEED * dt)
 
-        self.turns.update(dt)
-
-        ui = self.ui
-        if ui.selected_unit is not None and not ui.selected_unit.alive:
-            ui.selected_unit = None
+        unit = ui.selected_unit
+        if unit is not None and (not unit.alive or self.world.grid.tile(unit.pos).unit is not unit):
+            ui.selected_unit = None  # morta, ou substituída por desfazer/ressincronização
         if not self.turns.is_player_phase:
             ui.mode = None
         ui.hover_tile = self.camera.screen_to_tile(pygame.mouse.get_pos())
+        self.session.send_cursor(ui.hover_tile)
         unit = ui.selected_unit
         if unit is not None and self.turns.is_player_phase:
             ui.move_tiles = set(self.world.unit_moves(unit))

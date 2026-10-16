@@ -11,6 +11,8 @@ python main.py --no-fog  # começa com névoa de guerra desligada
 python main.py --no-music  # começa sem trilha sonora
 python main.py --editor    # abre direto no editor de mapas
 python main.py --map maps/meu_mapa.json  # joga um mapa personalizado
+python main.py --host          # hospeda uma partida co-op (porta 5757)
+python main.py --join 192.168.0.10[:5757]  # entra na partida de um amigo
 python -m unittest discover -s tests -t .
 ```
 
@@ -19,7 +21,7 @@ python -m unittest discover -s tests -t .
 |---|---|
 | Clique em unidade | Seleciona (azul = mover, vermelho = atacar, amarelo = coletar) |
 | `1` … `8` / botões | Construir Muro / Tenda / Balista, Reparar, Construir Tesla / Torre de Vigia / Serraria / Extrator de Pedra |
-| `Esc` | Cancela modo/seleção; sem seleção abre o menu (pausa) |
+| `Esc` | Cancela modo/seleção; sem seleção abre o menu (pausa no solo; no co-op o jogo segue) |
 | `F` / item do menu | Liga/desliga a névoa de guerra |
 | `M` / item do menu | Liga/desliga a música |
 | `-` `+` (menu: `←` `→`) | Volume da música |
@@ -41,6 +43,32 @@ Construir, reparar, mover, atacar e coletar podem ser desfeitos (`Z`, `Backspace
   sofre emboscada), ela e todas as anteriores ficam travadas;
 - com a FOW desligada nada é revelado, então o desfazer está sempre disponível;
 - abrir caixas não trava o histórico (o conteúdo já aparece na inspeção).
+
+## Co-op em rede (host/IP)
+
+Até 4 jogadores na mesma partida, cooperando contra a horda:
+
+1. **Anfitrião:** Menu → **Hospedar Co-op** (ou `python main.py --host [PORTA]`). O menu mostra o
+   endereço a passar aos amigos (ex.: `192.168.0.10:5757`). A partida atual continua, agora aberta.
+2. **Convidados:** no menu, passe o mouse/setas em **Entrar no IP**, digite o endereço
+   (`IP` ou `IP:PORTA`) e tecle `Enter` (ou `python main.py --join IP[:PORTA]`).
+
+Regras do co-op:
+- **Tudo é compartilhado:** ouro/madeira/pedra, AP do turno, unidades, construções e visão (névoa).
+  Qualquer jogador pode construir, mover/atacar com qualquer unidade, desfazer, alternar a névoa
+  e **encerrar o turno**.
+- Cada jogador vê o cursor dos outros (`P1` = anfitrião, `P2`…); o HUD mostra `Co-op HOST · 3J`.
+- Só o anfitrião escolhe mapa, inicia **Nova Partida** (inclusive pelo editor) ou reinicia (`R`).
+- Quem entra no meio da partida recebe o estado atual. Se o anfitrião cair, o convidado continua
+  a partida sozinho, offline; **Encerrar Co-op/Desconectar** faz o mesmo.
+- Todos precisam da mesma versão do jogo e dos mesmos `data/*.csv` (a conexão é recusada se
+  diferirem). Em outra rede, libere a porta TCP (padrão `5757`, `NET_PORT` em `config.py`) no
+  firewall/roteador.
+
+Como funciona (`game/coop.py`, `game/net.py`): *lockstep* determinístico. Toda ação vira um
+comando JSON; o anfitrião o valida, aplica e retransmite numerado para todos, que o aplicam na
+mesma ordem sobre o mesmo mundo (mesma semente). Um checksum do estado é conferido após cada
+comando/turno; se divergir, o convidado é ressincronizado automaticamente (replay do histórico).
 
 ## Editor de mapas
 Menu → **Editor de Mapas** (`E`) ou `python main.py --editor`.
@@ -205,6 +233,8 @@ Edite no Excel/LibreOffice ou num editor de texto e **reinicie o jogo** para apl
 - `game/entities.py` – `Building` (CC, Tenda, Muro, Balista, Tesla, Torre de Vigia, Serraria, Extrator de Pedra, Casa Infectada), `Unit` (Soldado, Ranger), `ZombieSwarm` (tipado)
 - `game/world.py` – regras e simulação (sem pygame)
 - `game/turns.py` – máquina de estados das fases
+- `game/coop.py` – co-op: comandos, sessões local/anfitrião/convidado, checksum (sem pygame)
+- `game/net.py` – transporte TCP (JSON por linha, threads)
 - `game/renderer.py` – câmera (offset/zoom) e desenho
 - `game/hud.py` – painel lateral
 - `game/fog.py` – névoa de guerra (visível/explorado)

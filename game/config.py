@@ -92,6 +92,13 @@ CRATE_SPACING = 3       # distância Chebyshev mínima entre caixas
 
 PHASE_DELAY = 0.45  # segundos exibindo cada fase automática
 
+# --- Co-op em rede (host/IP) --------------------------------------------------
+NET_PORT = 5757
+NET_MAX_PLAYERS = 4     # anfitrião incluso
+NET_DEFAULT_ADDRESS = "127.0.0.1"
+# cor do cursor/etiqueta de cada jogador (P1 = anfitrião)
+PLAYER_COLORS = ((90, 200, 255), (255, 170, 60), (200, 130, 255), (130, 235, 120))
+
 # --- Névoa de guerra --------------------------------------------------------
 FOW_ENABLED_DEFAULT = True  # raios de visão: coluna `vision` dos CSVs
 

@@ -136,6 +136,9 @@ class HUD:
         where = f"Mapa: {world.map_name}" if world.map_name else f"Seed {world.seed}"
         y = self._line(surface, f"Turno {world.turn}/{MAX_TURNS}   {where}", (x, y), 22)
         phase_color = COLORS["text"] if turns.is_player_phase else COLORS["noise"]
+        if ui.net_status:
+            img = self.font(18).render(ui.net_status, True, COLORS["territory"])
+            surface.blit(img, img.get_rect(topright=(self.rect.right - 12, y + 3)))
         y = self._line(surface, f"Fase: {turns.phase.value}", (x, y), 22, phase_color)
 
         res_y = y + 2

@@ -154,13 +154,14 @@ class World:
         state = {k: v for k, v in self.__dict__.items() if k != "history"}
         return copy.deepcopy(state)
 
-    def _observation(self) -> tuple[int, set[int]]:
+    def _observation(self) -> tuple[int, set[Pos]]:
+        # posições (não id()): o resultado precisa ser idêntico em todos os jogadores do co-op
         if not self.fog.enabled:
             return 0, set()
-        seen = {id(s) for s in self.grid.swarms() if self.fog.is_visible(s.pos)}
+        seen = {s.pos for s in self.grid.swarms() if self.fog.is_visible(s.pos)}
         return len(self.fog.explored), seen
 
-    def _observation_grew(self, before: tuple[int, set[int]]) -> bool:
+    def _observation_grew(self, before: tuple[int, set[Pos]]) -> bool:
         explored, seen = self._observation()
         return explored > before[0] or bool(seen - before[1])
 

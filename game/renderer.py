@@ -7,8 +7,8 @@ from typing import Optional
 
 import pygame
 
-from .config import (COLORS, EXHAUSTED_TINT, INFECTED_TINT, TILE_SIZE, WAVE_EDGE_SPREAD,
-                     WAVE_WARNING_TURNS, ZOMBIE_TINTS)
+from .config import (COLORS, EXHAUSTED_TINT, INFECTED_TINT, PLAYER_COLORS, TILE_SIZE,
+                     WAVE_EDGE_SPREAD, WAVE_WARNING_TURNS, ZOMBIE_TINTS)
 from .entities import Building, Unit, ZombieSwarm
 from .grid import Pos, Terrain
 from .sprites import SpriteManager
@@ -30,7 +30,8 @@ class UIState:
     move_tiles: set[Pos] = field(default_factory=set)
     attack_tiles: set[Pos] = field(default_factory=set)
     gather_tiles: set[Pos] = field(default_factory=set)
-
+    peer_cursors: dict[int, Pos] = field(default_factory=dict)  # co-op: id do jogador -> tile
+    net_status: str = ""
 
 class Camera:
     MIN_ZOOM = 0.5
@@ -219,6 +220,14 @@ class Renderer:
             pygame.draw.rect(surface, COLORS["select"], cam.tile_rect(ui.selected_tile), 2)
         if ui.hover_tile is not None:
             pygame.draw.rect(surface, COLORS["hover"], cam.tile_rect(ui.hover_tile), 1)
+        for pid, pos in sorted(ui.peer_cursors.items()):
+            color = PLAYER_COLORS[(pid - 1) % len(PLAYER_COLORS)]
+            rect = cam.tile_rect(pos)
+            pygame.draw.rect(surface, color, rect, 2)
+            tag = self.font(max(14, int(ts * 0.45))).render(f"P{pid}", True, color)
+            back = tag.get_rect(bottomleft=(rect.left, rect.top)).inflate(4, 0)
+            self._overlay(surface, back, (0, 0, 0), 170)
+            surface.blit(tag, tag.get_rect(center=back.center))
         surface.set_clip(None)
 
     def _draw_terrain(self, surface, rect, terrain, amount, ts) -> None:
