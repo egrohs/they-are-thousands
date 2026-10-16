@@ -1,0 +1,12 @@
+{
+  "sessions" : [ {
+    "id" : "b22b750a-bdeb-4467-9d5a-749f5bb54748",
+    "title" : "Default Chat",
+    "createdAt" : 1792159899475,
+    "backendSessionId" : null,
+    "messages" : [ ],
+    "uiMessages" : [ ]
+  } ],
+  "currentSessionId" : "b22b750a-bdeb-4467-9d5a-749f5bb54748",
+  "lines" : [ ]
+}
