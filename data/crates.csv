@@ -1,0 +1,6 @@
+id,name,symbol,weight,gold,wood,stone,noise,min_dist,color,notes
+supplies,Suprimentos,SU,4,3,3,1,0,6,#c8a050,Caixa comum com um pouco de tudo
+gold,Baú de Ouro,OU,2,8,0,0,0,7,#f0c832,Ouro escondido por colonos
+lumber,Madeira Estocada,MA,3,0,8,0,0,6,#b4783c,Pilha de tábuas pronta para uso
+stone,Pedras Lavradas,PE,2,0,0,6,0,7,#a0a0aa,Blocos de pedra cortados
+cache,Esconderijo Militar,EM,1,8,6,4,3,9,#d05050,Raro e longe; o alarme ao abrir faz barulho (noise)

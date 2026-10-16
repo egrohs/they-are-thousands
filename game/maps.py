@@ -8,7 +8,8 @@ Formato (versão 1)::
       "resources": [[x, y, quantidade], ...],
       "buildings": [{"kind": "hq", "pos": [x, y]}, ...],
       "units": [{"kind": "soldier", "pos": [x, y]}, ...],
-      "swarms": [{"kind": "walker", "count": 3, "pos": [x, y], "aggressive": false}, ...]
+      "swarms": [{"kind": "walker", "count": 3, "pos": [x, y], "aggressive": false}, ...],
+      "crates": [{"kind": "supplies", "pos": [x, y]}, ...]      # opcional (data/crates.csv)
     }
 """
 from __future__ import annotations
@@ -22,7 +23,7 @@ from .config import GRID_H, GRID_W, MAPS_DIR
 from .entities import (BUILDING_TYPES, Building, CommandCenter, InfectedHouse, Ranger, Soldier,
                        Unit, ZombieSwarm)
 from .grid import Grid, Pos, Terrain
-from .stats import ZOMBIE_SPECS
+from .stats import CRATE_SPECS, ZOMBIE_SPECS
 
 MAP_VERSION = 1
 TERRAIN_CHARS = {Terrain.GRASS: "G", Terrain.FOREST: "F", Terrain.ROCK: "R", Terrain.WATER: "W"}
@@ -55,6 +56,7 @@ def grid_to_data(grid: Grid, name: str) -> dict[str, Any]:
         "units": [{"kind": t.unit.kind, "pos": [t.x, t.y]} for t in tiles if t.unit is not None],
         "swarms": [{"kind": t.swarm.kind, "count": t.swarm.count, "pos": [t.x, t.y],
                     "aggressive": t.swarm.aggressive} for t in tiles if t.swarm is not None],
+        "crates": [{"kind": t.crate, "pos": [t.x, t.y]} for t in tiles if t.crate],
     }
 
 
@@ -140,6 +142,18 @@ def build_grid(data: Any) -> tuple[Grid, CommandCenter]:
         if grid.tile(pos).occupied or not grid.tile(pos).terrain.passable:
             raise MapError(f"{where}: tile {pos} indisponível.")
         grid.place_swarm(ZombieSwarm(pos, count, bool(entry.get("aggressive", False)), kind))
+
+    for i, entry in enumerate(data.get("crates", [])):
+        where = f"Caixa #{i + 1}"
+        kind = entry.get("kind") if isinstance(entry, dict) else None
+        if kind not in CRATE_SPECS:
+            raise MapError(f"{where}: tipo de caixa desconhecido {kind!r}.")
+        pos = _pos(entry, where)
+        tile = grid.tile(pos)
+        if (not tile.terrain.passable or tile.building is not None or tile.unit is not None
+                or tile.crate):
+            raise MapError(f"{where}: tile {pos} indisponível.")
+        tile.crate = kind
     return grid, hq[0]
 
 

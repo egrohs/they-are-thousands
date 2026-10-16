@@ -40,7 +40,7 @@ class StatsFilesTest(unittest.TestCase):
 class StatsParsingTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
-        for name in ("buildings.csv", "units.csv", "zombies.csv", "waves.csv"):
+        for name in ("buildings.csv", "units.csv", "zombies.csv", "waves.csv", "crates.csv"):
             shutil.copy(DATA_DIR / name, self.tmp / name)
 
     def tearDown(self):
@@ -94,6 +94,17 @@ class StatsParsingTest(unittest.TestCase):
         self._edit("buildings.csv", "wall,Muro,M,1,1,0,2,0,10", "wall,Muro,M,1,1,0,2,0,0")
         with self.assertRaisesRegex(StatsError, "hp"):
             load_stats(self.tmp)
+
+    def test_crate_without_loot_rejected(self):
+        with (self.tmp / "crates.csv").open("a", encoding="utf-8") as f:
+            f.write("empty,Vazia,VZ,1,0,0,0,0,6,#000000,\n")
+        with self.assertRaisesRegex(StatsError, "empty"):
+            load_stats(self.tmp)
+
+    def test_crates_load(self):
+        stats = load_stats(self.tmp)
+        self.assertIn("supplies", stats.crates)
+        self.assertTrue(all(c.loot for c in stats.crates.values()))
 
     def test_unknown_building_rejected(self):
         with (self.tmp / "buildings.csv").open("a", encoding="utf-8") as f:

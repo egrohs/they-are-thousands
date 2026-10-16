@@ -322,6 +322,7 @@ class GameApp:
         big = self.renderer.font(96).render(title, True, color)
         self.screen.blit(big, big.get_rect(center=(self.viewport.centerx, self.viewport.centery - 40)))
         info = (f"Turno {self.world.turn} | Zumbis abatidos: {self.world.zombies_killed}"
+                f" | Caixas: {self.world.crates_found}/{self.world.crates_total}"
                 "   —   Pressione R para jogar novamente")
         small = self.renderer.font(28).render(info, True, COLORS["text"])
         self.screen.blit(small, small.get_rect(center=(self.viewport.centerx, self.viewport.centery + 30)))

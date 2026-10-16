@@ -80,6 +80,10 @@ WAVE_WARNING_TURNS = 3  # o indicador no mapa aparece a partir de N turnos antes
 # tipos dos enxames iniciais espalhados pelo mapa (sorteio ponderado)
 START_SWARM_TYPES = (("walker", 4), ("runner", 1))
 
+# caixas de recursos (tipos em data/crates.csv): espalhadas fora da base nos mapas aleatórios
+CRATE_COUNT = 7
+CRATE_SPACING = 3       # distância Chebyshev mínima entre caixas
+
 PHASE_DELAY = 0.45  # segundos exibindo cada fase automática
 
 # --- Névoa de guerra --------------------------------------------------------

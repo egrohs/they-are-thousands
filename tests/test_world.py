@@ -4,7 +4,7 @@ import unittest
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 from game.config import AP_PER_TURN, MAX_TURNS
-from game.stats import BUILD_SPECS
+from game.stats import BUILD_SPECS, CRATE_SPECS
 from game.entities import InfectedHouse, Ranger, Soldier, Tent, Wall, Watchtower, ZombieSwarm
 from game.fog import FogOfWar
 from game.grid import Grid, Terrain
@@ -162,6 +162,60 @@ class WatchtowerTests(unittest.TestCase):
         self.world.garrisons_fire()
         self.assertLess(swarm.count, 5)
         self.assertTrue(self.ranger.acted)
+
+
+class CrateTests(unittest.TestCase):
+    def setUp(self):
+        self.world = World(seed=11, fog_enabled=False)
+        for t in self.world.grid:
+            t.terrain, t.resource_amount = Terrain.GRASS, 0
+            t.building = t.unit = t.swarm = t.crate = None
+        self.world.hq.pos = (20, 20)
+        self.world.grid.place_building(self.world.hq)
+        self.unit = Ranger((5, 5))
+        self.world.grid.place_unit(self.unit)
+
+    def test_random_maps_have_crates_outside_base(self):
+        for seed in range(10):
+            w = World(seed=seed)
+            crates = [t for t in w.grid if t.crate]
+            self.assertEqual(len(crates), w.crates_total)
+            self.assertGreater(len(crates), 0, seed)
+            for t in crates:
+                self.assertTrue(t.terrain.passable)
+                self.assertIsNone(t.building)
+                self.assertIsNone(t.unit)
+                self.assertGreaterEqual(Grid.chebyshev(t.pos, w.center), CRATE_SPECS[t.crate].min_dist)
+
+    def test_crates_do_not_change_map_generation(self):
+        a, b = World(seed=5), World(seed=5)
+        self.assertEqual([(t.terrain, t.crate) for t in a.grid], [(t.terrain, t.crate) for t in b.grid])
+
+    def test_unit_collects_crate_on_path(self):
+        self.world.grid.tile((6, 5)).crate = "supplies"
+        before = dict(self.world.resources)
+        self.assertTrue(self.world.move_unit(self.unit, (7, 5)))
+        self.assertIsNone(self.world.grid.tile((6, 5)).crate)
+        for k, v in CRATE_SPECS["supplies"].loot.items():
+            self.assertEqual(self.world.resources[k], before[k] + v)
+        self.assertEqual(self.world.crates_found, 1)
+        self.assertEqual(self.world.ap, AP_PER_TURN)  # coletar não gasta AP
+
+    def test_crates_do_not_block_and_alarm_makes_noise(self):
+        self.world.grid.tile((5, 6)).crate = "cache"
+        self.assertIn((5, 6), self.world.unit_moves(self.unit))
+        self.world.move_unit(self.unit, (5, 6))
+        self.assertTrue(any(n.pos == (5, 6) and n.radius == CRATE_SPECS["cache"].noise
+                            for n in self.world.pending_noise))
+
+    def test_hidden_until_explored_and_map_roundtrip(self):
+        from game.maps import build_grid, grid_to_data
+        self.world.grid.tile((2, 2)).crate = "gold"
+        grid, _ = build_grid(grid_to_data(self.world.grid, "t"))
+        self.assertEqual(grid.tile((2, 2)).crate, "gold")
+        fogged = World(seed=3, fog_enabled=True)
+        far = next(t for t in fogged.grid if t.crate)
+        self.assertFalse(fogged.fog.is_explored(far.pos))
 
 
 class ZombieTypeTests(unittest.TestCase):

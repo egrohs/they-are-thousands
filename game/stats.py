@@ -2,6 +2,7 @@
 
 * `data/buildings.csv`, `data/units.csv`, `data/zombies.csv` – uma linha por tipo, `id` como chave.
 * `data/waves.csv` – cronograma de ondas (turno, direção, tipo, enxames, tamanho).
+* `data/crates.csv` – caixas de recursos espalhadas pelo mapa (conteúdo e raridade).
 * Aceita separador `,` ou `;` e, com `;`, vírgula decimal (formato do Excel em pt-BR).
 * Colunas `notes`/`description` são livres; colunas desconhecidas geram erro (evita typos).
 * Erros viram `StatsError` com arquivo, linha e coluna.
@@ -94,6 +95,27 @@ class WaveRow:
     size: int
     final: bool = False        # pertence à horda final
     notes: str = ""
+
+
+@dataclass(frozen=True)
+class CrateStats:
+    """Tipo de caixa de recursos (`data/crates.csv`), aberta por uma unidade que pisa nela."""
+    id: str
+    name: str
+    symbol: str
+    weight: int = 1            # peso no sorteio dos mapas aleatórios (0 = só no editor)
+    gold: int = 0
+    wood: int = 0
+    stone: int = 0
+    noise: int = 0             # ruído ao abrir (atrai zumbis)
+    min_dist: int = 6          # distância mínima (Chebyshev) do centro do mapa
+    color: Color = (200, 160, 80)
+    notes: str = ""
+
+    @property
+    def loot(self) -> dict[str, int]:
+        return {k: v for k, v in (("gold", self.gold), ("wood", self.wood),
+                                  ("stone", self.stone)) if v > 0}
 
 
 # lado da grade: 0 = norte (y=0), 1 = sul, 2 = oeste (x=0), 3 = leste
@@ -258,6 +280,15 @@ class GameStats:
     units: dict[str, UnitStats]
     zombies: dict[str, ZombieSpec]
     waves: list[WaveRow]
+    crates: dict[str, CrateStats] = dataclasses.field(default_factory=dict)
+
+
+def _check_crates(crates: dict[str, CrateStats]) -> dict[str, CrateStats]:
+    for c in crates.values():
+        if not c.loot:
+            raise StatsError(f"crates.csv: a caixa '{c.id}' precisa dar algum recurso "
+                             f"(gold, wood ou stone > 0).")
+    return crates
 
 
 def _check_ids(where: str, table: dict, required: set[str], exact: bool) -> None:
@@ -286,7 +317,8 @@ def load_stats(folder: Path = DATA_DIR) -> GameStats:
     for kind in ("hq", "infected"):
         if buildings[kind].buildable:
             raise StatsError(f"buildings.csv: '{kind}' não pode ter buildable=1.")
-    return GameStats(buildings, units, zombies, waves)
+    crates = _check_crates(read_table(folder / "crates.csv", CrateStats))
+    return GameStats(buildings, units, zombies, waves, crates)
 
 
 STATS = load_stats()
@@ -295,6 +327,7 @@ UNIT_SPECS: dict[str, UnitStats] = STATS.units
 ZOMBIE_SPECS: dict[str, ZombieSpec] = STATS.zombies
 # cronograma de ondas (ordenado por turno); direções "?" são sorteadas no início da partida
 WAVE_SCHEDULE: list[WaveRow] = STATS.waves
+CRATE_SPECS: dict[str, CrateStats] = STATS.crates
 # construções que o jogador pode erguer (botões/atalhos)
 BUILD_SPECS: dict[str, BuildingStats] = {k: v for k, v in BUILDING_STATS.items() if v.buildable}
 VISION_RADIUS: dict[str, int] = {**{k: v.vision for k, v in BUILDING_STATS.items()},

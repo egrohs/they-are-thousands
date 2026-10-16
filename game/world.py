@@ -13,13 +13,13 @@ from .config import (AGGRO_DISTANCE, AP_PER_TURN, ATTACK_AP,
                      GATHER_AP, GATHER_NOISE, GRID_H, GRID_W, MAX_TURNS,
                      NOISE_MEMORY_TURNS, REPAIR_AMOUNT, REPAIR_AP, REPAIR_NOISE, REPAIR_WOOD,
                      RESOURCE_LABELS, START_RESOURCES, START_SWARM_TYPES, WALL_BASH_COST,
-                     WANDER_CHANCE, WAVE_EDGE_DEPTH, WAVE_EDGE_SPREAD)
+                     WANDER_CHANCE, WAVE_EDGE_DEPTH, WAVE_EDGE_SPREAD, CRATE_COUNT, CRATE_SPACING)
 from .entities import (BUILDING_TYPES, Building, CommandCenter, Entity, InfectedHouse,
                        Ranger, Soldier, Tent, Unit, ZombieSwarm)
 from .fog import FogOfWar
 from .grid import INF, Grid, Pos, Terrain
-from .stats import (BUILD_SPECS, BUILDING_STATS, DIRECTION_NAMES, WAVE_SCHEDULE, ZOMBIE_SPECS,
-                    WaveRow, direction_token)
+from .stats import (BUILD_SPECS, BUILDING_STATS, CRATE_SPECS, DIRECTION_NAMES, WAVE_SCHEDULE,
+                    ZOMBIE_SPECS, WaveRow, direction_token)
 
 MAX_LOG = 80
 
@@ -106,8 +106,11 @@ class World:
         self.victory = False
         self.final_horde_spawned = False
         self.zombies_killed = 0
+        self.crates_found = 0
         if map_data is None:
             self._generate_map()
+            self._place_crates()
+        self.crates_total = sum(1 for t in self.grid if t.crate)
         self.waves = self._plan_waves(WAVE_SCHEDULE)
         self.begin_player_phase()
         if self.map_name:
@@ -242,6 +245,51 @@ class World:
                 self.grid.place_swarm(ZombieSwarm(p, self.rng.randint(2, 5), kind=kind))
                 placed += 1
 
+    def _place_crates(self) -> None:
+        """Espalha caixas de recursos com RNG próprio (não altera o mapa nem a IA)."""
+        rng = random.Random(self.seed * 7_919 + 13)
+        kinds = [k for k, c in CRATE_SPECS.items() if c.weight > 0]
+        if not kinds:
+            return
+        weights = [CRATE_SPECS[k].weight for k in kinds]
+        placed: list[Pos] = []
+        cells = [t.pos for t in self.grid if t.terrain.passable]
+        for _ in range(CRATE_COUNT):
+            kind = rng.choices(kinds, weights)[0]
+            spec = CRATE_SPECS[kind]
+            options = [p for p in cells if Grid.chebyshev(p, self.center) >= spec.min_dist
+                       and self.grid.is_free(p) and not self.grid.tile(p).crate
+                       and all(Grid.chebyshev(p, q) >= CRATE_SPACING for q in placed)]
+            if not options:
+                continue
+            p = rng.choice(options)
+            self.grid.tile(p).crate = kind
+            placed.append(p)
+
+    @staticmethod
+    def loot_text(kind: str) -> str:
+        return ", ".join(f"+{v} {RESOURCE_LABELS[k]}" for k, v in CRATE_SPECS[kind].loot.items())
+
+    def collect_crate(self, pos: Pos, who: str) -> bool:
+        """Abre a caixa em `pos` (se houver): recursos entram no estoque na hora."""
+        tile = self.grid.tile(pos)
+        kind = tile.crate
+        if kind is None:
+            return False
+        tile.crate = None
+        spec = CRATE_SPECS.get(kind)
+        if spec is None:
+            return False
+        for k, v in spec.loot.items():
+            self.resources[k] += v
+        self.crates_found += 1
+        self.effects.append(Effect(pos, pos, "loot"))
+        self.message(f"{who} abriu {spec.name} em {pos}: {self.loot_text(kind)}.")
+        if spec.noise > 0:
+            self.emit_noise(pos, spec.noise, spec.name)
+            self.message(f"O alarme da caixa fez barulho (raio {spec.noise})!")
+        return True
+
     # ======================================================================
     # Ações do jogador: construção / reparo
     # ======================================================================
@@ -293,6 +341,7 @@ class World:
         self.update_fog()
         self.emit_noise(pos, spec.noise, spec.name)
         self.message(f"{spec.name} construído(a) em {pos}.")
+        self.collect_crate(pos, "A obra")
         return True
 
     def can_repair(self, pos: Pos) -> tuple[bool, str]:
@@ -386,6 +435,7 @@ class World:
                 break
             self.grid.move_unit(unit, step)
             self.update_fog()
+            self.collect_crate(step, unit.name)
         return True
 
     def attack_targets(self, unit: Unit) -> list[Pos]:

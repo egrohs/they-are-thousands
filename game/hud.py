@@ -10,7 +10,7 @@ from .config import (COLORS, MAX_TURNS, REPAIR_AMOUNT, REPAIR_AP,
                      REPAIR_WOOD,                      RESOURCE_LABELS)
 from .grid import Pos
 from .renderer import UIState
-from .stats import BUILDING_STATS
+from .stats import BUILDING_STATS, CRATE_SPECS
 from .turns import TurnManager
 from .world import World
 
@@ -137,6 +137,9 @@ class HUD:
             surface.blit(img, (col, res_y))
             col += img.get_width() + 14
         y = res_y + 22
+        if world.crates_total:
+            self._line(surface, f"Caixas: {world.crates_found}/{world.crates_total}",
+                       (x + 110, y + 5), 20, COLORS["gold"])
         y = self._line(surface, f"AP: {world.ap}", (x, y), 26, COLORS["ap"])
         if world.fog.enabled:
             zombies = f"Zumbis à vista: {world.visible_zombies}"
@@ -187,6 +190,11 @@ class HUD:
             if not seen:
                 terrain += " — sob névoa"
             lines.append((f"Tile {pos}: {terrain}", COLORS["text"]))
+            if t.crate and t.crate in CRATE_SPECS:
+                spec = CRATE_SPECS[t.crate]
+                alarm = f" | alarme: ruído {spec.noise}" if spec.noise else ""
+                lines.append((f"Caixa: {spec.name} ({world.loot_text(t.crate)}){alarm} - "
+                              f"leve uma unidade até ela", spec.color))
             if t.building is not None:
                 b = t.building
                 lines.append((f"{b.name} HP {b.hp}/{b.max_hp}", COLORS[b.color_key]))

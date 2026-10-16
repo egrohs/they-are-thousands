@@ -12,7 +12,7 @@ from .config import (COLORS, EXHAUSTED_TINT, INFECTED_TINT, TILE_SIZE, WAVE_EDGE
 from .entities import Building, Unit, ZombieSwarm
 from .grid import Pos, Terrain
 from .sprites import SpriteManager
-from .stats import BUILD_SPECS, DIRECTION_NAMES
+from .stats import BUILD_SPECS, CRATE_SPECS, DIRECTION_NAMES
 from .world import World, edge_pos
 
 
@@ -186,6 +186,9 @@ class Renderer:
 
         fog = world.fog
         for t in visible:
+            if t.crate and t.unit is None and fog.is_explored(t.pos):
+                self._draw_crate(surface, cam.tile_rect(t.pos), t.crate, ts)
+        for t in visible:
             rect = cam.tile_rect(t.pos)
             if t.building is not None:
                 self._draw_building(surface, rect, t.building, ts)
@@ -202,6 +205,10 @@ class Renderer:
 
         for eff in world.effects:
             if not (fog.is_visible(eff.start) or fog.is_visible(eff.end)):
+                continue
+            if eff.color_key == "loot":
+                rect = cam.tile_rect(eff.end)
+                pygame.draw.circle(surface, COLORS["gold"], rect.center, int(ts * 0.48), 2)
                 continue
             a = cam.tile_rect(eff.start).center
             b = cam.tile_rect(eff.end).center
@@ -233,6 +240,24 @@ class Renderer:
             f = self.font(ts * 0.4)
             img = f.render(str(amount), True, COLORS["gold"])
             surface.blit(img, (rect.right - img.get_width() - 2, rect.top + 1))
+
+    def _draw_crate(self, surface, rect: pygame.Rect, kind: str, ts) -> None:
+        """Caixa de madeira com faixa na cor do tipo (data/crates.csv)."""
+        spec = CRATE_SPECS.get(kind)
+        band = spec.color if spec else COLORS["gold"]
+        box = rect.inflate(-int(rect.w * 0.42), -int(rect.h * 0.42))
+        box.centery += int(ts * 0.04)
+        pygame.draw.rect(surface, (120, 82, 42), box)
+        lid = pygame.Rect(box.left - 1, box.top - max(2, int(ts * 0.08)), box.w + 2, max(3, int(ts * 0.12)))
+        pygame.draw.rect(surface, (150, 105, 55), lid)
+        strip = max(2, int(ts * 0.08))
+        pygame.draw.rect(surface, band, (box.centerx - strip // 2, lid.top, strip, box.bottom - lid.top))
+        pygame.draw.rect(surface, (40, 25, 10), box, 1)
+        pygame.draw.rect(surface, (40, 25, 10), lid, 1)
+        spark = max(2, int(ts * 0.07))
+        sx, sy = box.right + spark // 2, lid.top - spark // 2
+        pygame.draw.line(surface, (255, 240, 160), (sx - spark, sy), (sx + spark, sy))
+        pygame.draw.line(surface, (255, 240, 160), (sx, sy - spark), (sx, sy + spark))
 
     def _draw_overlays(self, surface, world: World, cam: Camera, ui: UIState) -> None:
         for p, level in world.noise_map.items():

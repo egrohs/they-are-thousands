@@ -14,7 +14,7 @@ import pygame
 from .config import COLORS, GRID_H, GRID_W, MAPS_DIR, MAX_SWARM_SIZE
 from .entities import CommandCenter, ZombieSwarm
 from .grid import Pos, Terrain
-from .stats import ZOMBIE_SPECS
+from .stats import CRATE_SPECS, ZOMBIE_SPECS
 from .hud import Button, wrap_text
 from .maps import (MAP_BUILDINGS, MAP_UNITS, MapError, build_grid, grid_to_data, list_maps,
                    load_map, save_map)
@@ -33,6 +33,7 @@ TOOL_LABELS: dict[str, str] = {
     "b:tesla": "Tesla", "b:watchtower": "Torre Vigia", "b:infected": "Casa Inf.",
     "u:soldier": "Soldado", "u:ranger": "Ranger",
     **{f"z:{k}": spec.name for k, spec in ZOMBIE_SPECS.items()},
+    **{f"c:{k}": spec.name.split()[0] for k, spec in CRATE_SPECS.items()},
     "erase": "Borracha",
 }
 
@@ -41,7 +42,8 @@ def blank_map_data(name: str = DEFAULT_NAME) -> dict[str, Any]:
     cx, cy = GRID_W // 2, GRID_H // 2
     return {"version": 1, "name": name, "width": GRID_W, "height": GRID_H,
             "terrain": ["G" * GRID_W] * GRID_H, "resources": [],
-            "buildings": [{"kind": "hq", "pos": [cx, cy]}], "units": [], "swarms": []}
+            "buildings": [{"kind": "hq", "pos": [cx, cy]}], "units": [], "swarms": [],
+            "crates": []}
 
 
 class MapEditor:
@@ -190,7 +192,7 @@ class MapEditor:
                 self.status = "O CC só fica em Campo; mova-o antes."
                 return False
             if not terrain.passable:
-                tile.building = tile.unit = tile.swarm = None
+                tile.building = tile.unit = tile.swarm = tile.crate = None
             tile.terrain, tile.resource_amount = terrain, amount
             return True
         if tool == "erase":
@@ -198,6 +200,8 @@ class MapEditor:
                 tile.swarm = None
             elif tile.unit is not None:
                 tile.unit = None
+            elif tile.crate:
+                tile.crate = None
             elif tile.building is not None and not is_hq:
                 tile.building = None
             elif is_hq:
@@ -217,10 +221,16 @@ class MapEditor:
         if not tile.terrain.passable:
             self.status = f"Unidades e zumbis não ficam em {tile.terrain.label}."
             return False
+        if category == "c":
+            if tile.crate == kind:
+                return False
+            tile.building = tile.unit = None
+            tile.crate = kind
+            return True
         if category == "u":
             if tile.unit is not None and tile.unit.kind == kind:
                 return False
-            tile.building = tile.swarm = None
+            tile.building = tile.swarm = tile.crate = None
             tile.unit = MAP_UNITS[kind](pos)
             return True
         if category == "z":
@@ -238,7 +248,7 @@ class MapEditor:
         tile = grid.tile(pos)
         if tile.building is not None and tile.building.kind == kind:
             return False
-        tile.building = tile.unit = tile.swarm = None
+        tile.building = tile.unit = tile.swarm = tile.crate = None
         tile.terrain, tile.resource_amount = Terrain.GRASS, 0
         if kind == "hq":
             grid.remove_building(self.world.hq)
@@ -258,6 +268,8 @@ class MapEditor:
             lines.append(t.unit.name)
         if t.swarm is not None:
             lines.append(f"{t.swarm.name} x{t.swarm.count}")
+        if t.crate and t.crate in CRATE_SPECS:
+            lines.append(f"Caixa: {CRATE_SPECS[t.crate].name} ({World.loot_text(t.crate)})")
         return lines
 
 
@@ -330,6 +342,8 @@ class EditorScreen:
         y = section("Unidades / Zumbis")
         y = self._row(y, tools(["u:soldier", "u:ranger", "erase"]
                                + [f"z:{k}" for k in ZOMBIE_SPECS]), 3) + 4
+        y = section("Caixas de recursos")
+        y = self._row(y, tools([f"c:{k}" for k in CRATE_SPECS]), 3, 24) + 4
         y = self._row(y, [("amount_down", "-"), ("amount_up", "+"), ("brush", "Pincel")], 3) + 4
         y = self._row(y, [("undo", "Desfazer"), ("redo", "Refazer"), ("new", "Vazio"),
                           ("generate", "Aleatório")], 4)
@@ -531,6 +545,8 @@ class EditorScreen:
             color = None
             if b.action.startswith("z:"):
                 color = ZOMBIE_SPECS[b.action[2:]].color
+            elif b.action.startswith("c:"):
+                color = tuple(int(c * 0.55) for c in CRATE_SPECS[b.action[2:]].color)
             elif b.action == "play":
                 color = COLORS["button_active"]
             b.draw(surface, self, b.rect.collidepoint(mouse_pos), b.action == ed.tool, True, color)

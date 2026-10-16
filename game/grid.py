@@ -56,6 +56,7 @@ class Tile:
     building: Optional["Building"] = None
     unit: Optional["Unit"] = None
     swarm: Optional["ZombieSwarm"] = None
+    crate: Optional[str] = None  # id em data/crates.csv; não bloqueia o tile
 
     @property
     def pos(self) -> Pos:
