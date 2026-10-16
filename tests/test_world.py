@@ -29,6 +29,88 @@ class GridTests(unittest.TestCase):
         self.assertNotIn((2, 0), field)
 
 
+class ZombieTypeTests(unittest.TestCase):
+    def setUp(self):
+        self.world = World(seed=7, fog_enabled=False)
+        for t in self.world.grid:
+            t.terrain, t.resource_amount = Terrain.GRASS, 0
+            t.building = t.unit = t.swarm = None
+        self.tent = Tent((5, 1))
+        self.world.grid.place_building(self.tent)
+
+    def place(self, kind, pos, count=3):
+        s = ZombieSwarm(pos, count, aggressive=True, kind=kind)
+        self.world.grid.place_swarm(s)
+        return s
+
+    def wall_row(self, y):
+        for x in range(self.world.grid.width):
+            self.world.grid.place_building(Wall((x, y)))
+
+    def test_brute_has_multiple_hp_and_wounds(self):
+        s = ZombieSwarm((0, 0), 3, kind="brute")
+        self.assertEqual(s.kill(4), 1)
+        self.assertEqual(s.wounds, 1)
+        self.assertEqual(s.kill(2), 1)
+        self.assertEqual((s.count, s.wounds), (1, 0))
+
+    def test_brute_double_damage_vs_structures(self):
+        s = ZombieSwarm((0, 0), 2, kind="brute")
+        self.assertEqual(s.damage_against(False), 3)
+        self.assertEqual(s.damage_against(True), 6)
+
+    def test_stack_limit_per_type(self):
+        self.assertEqual(ZombieSwarm((0, 0), 10, kind="brute").count, 4)
+
+    def test_runner_is_faster_than_walker(self):
+        runner = self.place("runner", (5, 12))
+        walker = self.place("walker", (7, 12))
+        self.world.zombies_move()
+        self.assertEqual(runner.pos, (5, 9))
+        self.assertEqual(Grid.manhattan(walker.pos, (7, 12)), 2)
+
+    def test_different_types_do_not_merge(self):
+        self.place("walker", (5, 3), 2)
+        runner = self.place("runner", (5, 4), 2)
+        self.world.zombies_move()
+        kinds = sorted(s.kind for s in self.world.grid.swarms())
+        self.assertEqual(kinds, ["runner", "walker"])
+        self.assertEqual(runner.count, 2)
+
+    def test_harpy_leaps_over_walls_walker_does_not(self):
+        self.wall_row(4)
+        harpy = self.place("harpy", (5, 6))
+        walker = self.place("walker", (9, 6))
+        self.world.zombies_move()
+        self.assertLess(harpy.pos[1], 4)
+        self.assertGreater(walker.pos[1], 4)
+
+    def test_venom_spits_from_range(self):
+        venom = self.place("venom", (5, 3), 2)
+        self.world.zombies_move()
+        self.assertEqual(venom.pos, (5, 3))
+        hp = self.tent.hp
+        self.world.zombies_attack()
+        self.assertLess(self.tent.hp, hp)
+        self.assertEqual(self.world.effects[-1].color_key, "spit")
+
+    def test_runner_hears_farther(self):
+        walker = ZombieSwarm((10, 10), 2)
+        runner = ZombieSwarm((10, 15), 2, kind="runner")
+        for s in (walker, runner):
+            s.aggressive = False
+            self.world.grid.place_swarm(s)
+        self.world.emit_noise((10, 20), 4, "teste")
+        self.world.propagate_noise()
+        self.assertTrue(runner.aggressive)
+        self.assertFalse(walker.aggressive)
+
+    def test_waves_spawn_typed_swarms(self):
+        spawned = self.world._spawn_wave([("harpy", 1, 3), ("brute", 2, 2)])
+        self.assertEqual(spawned, {"harpy": 1, "brute": 2})
+        self.assertEqual({s.kind for s in self.world.grid.swarms()}, {"harpy", "brute"})
+
+
 class WorldTests(unittest.TestCase):
     def setUp(self):
         self.world = World(seed=123)

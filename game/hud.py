@@ -172,7 +172,14 @@ class HUD:
                 state = "agressivo" if s.aggressive else "ocioso"
                 if s.noise_target is not None:
                     state = f"atraído por som em {s.noise_target}"
-                lines.append((f"Enxame: {s.count} zumbis ({state})", COLORS["zombie_aggr"]))
+                sp = s.spec
+                lines.append((f"{sp.name} x{s.count}/{s.max_stack} ({state})",
+                              COLORS["zombie_aggr"]))
+                hp = f"HP {sp.hp}" + (f" (-{s.wounds})" if s.wounds else "")
+                lines.append((f"{hp} | Vel {sp.speed} | Dano {s.attack_power}"
+                              f"{f' | Alc {sp.attack_range}' if sp.attack_range > 1 else ''}",
+                              COLORS["text_dim"]))
+                lines.append((sp.description, COLORS["text_dim"]))
             level = world.noise_map.get(pos, 0)
             if level:
                 lines.append((f"Ruído no último turno: {level}", COLORS["noise"]))

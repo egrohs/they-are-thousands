@@ -6,7 +6,7 @@ from typing import Optional
 
 from .config import (BALLISTA_DAMAGE, BALLISTA_RANGE, BUILD_SPECS, HQ_BUILD_RADIUS,
                      HQ_GOLD_INCOME, HQ_HP, INFECTED_HP, MAX_SWARM_SIZE, TESLA_BUILD_RADIUS,
-                     UNIT_SPECS)
+                     UNIT_SPECS, ZOMBIE_SPECS, ZombieSpec)
 from .grid import Pos
 
 
@@ -145,15 +145,38 @@ class Ranger(Unit):
 
 # --- Zumbis ------------------------------------------------------------------
 class ZombieSwarm:
-    """Pilha de 1..MAX_SWARM_SIZE zumbis ocupando um único tile."""
+    """Pilha de 1..max_stack zumbis do mesmo tipo ocupando um único tile."""
 
-    def __init__(self, pos: Pos, count: int, aggressive: bool = False):
+    def __init__(self, pos: Pos, count: int, aggressive: bool = False, kind: str = "walker"):
         self.pos = pos
-        self.count = max(1, min(MAX_SWARM_SIZE, count))
+        self.kind = kind
+        self.spec: ZombieSpec = ZOMBIE_SPECS[kind]
+        self.count = max(1, min(self.max_stack, count))
+        self.wounds = 0  # dano acumulado no zumbi da frente (tipos com HP > 1)
         self.aggressive = aggressive
         self.noise_target: Optional[Pos] = None
         self.noise_turns = 0
         self.intent: Optional[Pos] = None  # tile que o enxame quer atacar
+
+    @property
+    def name(self) -> str:
+        return self.spec.name
+
+    @property
+    def max_stack(self) -> int:
+        return min(MAX_SWARM_SIZE, self.spec.max_stack)
+
+    @property
+    def speed(self) -> int:
+        return self.spec.speed
+
+    @property
+    def attack_range(self) -> int:
+        return self.spec.attack_range
+
+    @property
+    def flying(self) -> bool:
+        return self.spec.flying
 
     @property
     def alive(self) -> bool:
@@ -161,15 +184,25 @@ class ZombieSwarm:
 
     @property
     def space(self) -> int:
-        return MAX_SWARM_SIZE - self.count
+        return max(0, self.max_stack - self.count)
 
     @property
     def attack_power(self) -> int:
-        return max(1, math.ceil(self.count / 2))
+        return max(1, math.ceil(self.count * self.spec.attack))
 
-    def kill(self, amount: int) -> int:
-        killed = min(self.count, max(0, amount))
+    def damage_against(self, target_is_structure: bool) -> int:
+        mult = self.spec.structure_mult if target_is_structure else 1.0
+        return max(1, math.ceil(self.attack_power * mult))
+
+    def can_merge(self, other: "ZombieSwarm") -> bool:
+        return other.kind == self.kind and other.space > 0
+
+    def kill(self, damage: int) -> int:
+        """Aplica dano; retorna quantos zumbis morreram."""
+        total = self.wounds + max(0, damage)
+        killed = min(self.count, total // self.spec.hp)
         self.count -= killed
+        self.wounds = 0 if self.count == 0 else total - killed * self.spec.hp
         return killed
 
     def alert(self, target: Pos, turns: int) -> None:

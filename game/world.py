@@ -12,8 +12,8 @@ from .config import (AGGRO_DISTANCE, AP_PER_TURN, ATTACK_AP, BALLISTA_NOISE, BUI
                      FOW_ENABLED_DEFAULT, HQ_BUILD_RADIUS, TESLA_BUILD_RADIUS, FINAL_HORDE, FINAL_HORDE_TURN, FOREST_MOVE_COST, GATHER_AMOUNT,
                      GATHER_AP, GATHER_NOISE, GRID_H, GRID_W, INFECTED_SPAWN, MAX_TURNS,
                      NOISE_MEMORY_TURNS, REPAIR_AMOUNT, REPAIR_AP, REPAIR_NOISE, REPAIR_WOOD,
-                     RESOURCE_LABELS, START_RESOURCES, WALL_BASH_COST, WANDER_CHANCE, WAVES,
-                     ZOMBIE_SPEED)
+                     RESOURCE_LABELS, START_RESOURCES, START_SWARM_TYPES, WALL_BASH_COST,
+                     WANDER_CHANCE, WAVES, ZOMBIE_SPECS)
 from .entities import (BUILDING_TYPES, Ballista, Building, CommandCenter, Entity, InfectedHouse,
                        Ranger, Soldier, Tent, Unit, ZombieSwarm)
 from .fog import FogOfWar
@@ -148,7 +148,9 @@ class World:
                 break
             p = self._random_pos(8)
             if self.grid.is_free(p):
-                self.grid.place_swarm(ZombieSwarm(p, self.rng.randint(2, 5)))
+                kinds, weights = zip(*START_SWARM_TYPES)
+                kind = self.rng.choices(kinds, weights)[0]
+                self.grid.place_swarm(ZombieSwarm(p, self.rng.randint(2, 5), kind=kind))
                 placed += 1
 
     # ======================================================================
@@ -304,7 +306,10 @@ class World:
             swarm = tile.swarm
             killed = swarm.kill(unit.damage)
             self.zombies_killed += killed
-            self.message(f"{unit.name} abateu {killed} zumbi(s) em {pos}.")
+            if killed:
+                self.message(f"{unit.name} abateu {killed} {swarm.name}(s) em {pos}.")
+            else:
+                self.message(f"{unit.name} feriu um {swarm.name} em {pos}.")
             if not swarm.alive:
                 self.grid.remove_swarm(swarm)
         elif tile.building is not None:
@@ -365,11 +370,12 @@ class World:
                     self.noise_map[p] = level
         alerted = 0
         for swarm in self.grid.swarms():
+            hearing = swarm.spec.hearing
             best: Optional[tuple[int, NoiseEvent]] = None
             for ev in events:
                 d = Grid.manhattan(swarm.pos, ev.pos)
-                if d <= ev.radius:
-                    level = ev.radius - d + 1
+                if d <= ev.radius + hearing:
+                    level = ev.radius + hearing - d + 1
                     if best is None or level > best[0]:
                         best = (level, ev)
             if best is not None:
@@ -381,7 +387,7 @@ class World:
             else:
                 self.message(f"Barulho de {len(events)} fonte(s) atraiu {alerted} enxame(s).")
 
-    def _zombie_enter_cost(self, pos: Pos) -> Optional[float]:
+    def _zombie_enter_cost(self, pos: Pos, flying: bool = False) -> Optional[float]:
         tile = self.grid.tile(pos)
         if not tile.terrain.passable:
             return None
@@ -390,42 +396,81 @@ class World:
             if b.hostile:
                 return None
             if not b.civil:
-                return float(WALL_BASH_COST)
+                return 1.0 if flying else float(WALL_BASH_COST)
         if tile.terrain is Terrain.FOREST:
             return float(FOREST_MOVE_COST)
         return 1.0
 
-    def civil_field(self) -> dict[Pos, float]:
+    def _flying_enter_cost(self, pos: Pos) -> Optional[float]:
+        return self._zombie_enter_cost(pos, flying=True)
+
+    def civil_field(self, flying: bool = False) -> dict[Pos, float]:
         goals = [b.pos for b in self.grid.buildings() if b.civil and b.alive]
         goals += [u.pos for u in self.grid.units() if u.alive]
-        return self.grid.dijkstra(goals, self._zombie_enter_cost)
+        cost = self._flying_enter_cost if flying else self._zombie_enter_cost
+        return self.grid.dijkstra(goals, cost)
 
-    def _field_for(self, swarm: ZombieSwarm, civil: dict[Pos, float],
-                   cache: dict[Pos, dict[Pos, float]]) -> dict[Pos, float]:
+    def _field_for(self, swarm: ZombieSwarm, cache: dict[tuple, dict[Pos, float]]) -> dict[Pos, float]:
         target = swarm.noise_target
-        if target is None:
-            return civil
-        if Grid.manhattan(swarm.pos, target) <= 1:
+        if target is not None and Grid.manhattan(swarm.pos, target) <= 1:
             swarm.noise_target = None
             swarm.noise_turns = 0
-            return civil
-        if target not in cache:
-            cache[target] = self.grid.dijkstra([target], self._zombie_enter_cost)
-        return cache[target]
+            target = None
+        key = (target, swarm.flying)
+        if key not in cache:
+            if target is None:
+                cache[key] = self.civil_field(swarm.flying)
+            else:
+                cost = self._flying_enter_cost if swarm.flying else self._zombie_enter_cost
+                cache[key] = self.grid.dijkstra([target], cost)
+        return cache[key]
+
+    def _swarm_targets(self, swarm: ZombieSwarm) -> list[Entity]:
+        """Unidades/construções aliadas ao alcance de ataque do enxame."""
+        if swarm.attack_range <= 1:
+            cells = self.grid.neighbors4(swarm.pos)
+        else:
+            cells = [p for p in self.grid.tiles_in_radius(swarm.pos, swarm.attack_range, "manhattan")
+                     if p != swarm.pos]
+        targets: list[Entity] = []
+        for p in cells:
+            t = self.grid.tile(p)
+            if t.unit is not None and t.unit.alive:
+                targets.append(t.unit)
+            elif t.building is not None and not t.building.hostile and t.building.alive:
+                targets.append(t.building)
+        return targets
+
+    def _leap_target(self, swarm: ZombieSwarm, over: Pos) -> Optional[Pos]:
+        dest = (2 * over[0] - swarm.pos[0], 2 * over[1] - swarm.pos[1])
+        if not self.grid.in_bounds(dest) or not self.grid.tile(dest).terrain.passable:
+            return None
+        return dest if self.grid.is_free(dest) else None
 
     def _step_swarm(self, swarm: ZombieSwarm, field: dict[Pos, float]) -> bool:
         """Move um passo seguindo o campo. Retorna True se ainda pode continuar andando."""
+        if swarm.attack_range > 1 and swarm.noise_target is None:
+            in_range = self._swarm_targets(swarm)
+            if in_range:
+                swarm.intent = min(in_range, key=self._attack_priority).pos
+                return False
         current = field.get(swarm.pos, INF)
         candidates = sorted((field[n], n) for n in self.grid.neighbors4(swarm.pos)
                             if n in field and field[n] < current)
         for _, n in candidates:
             tile = self.grid.tile(n)
-            if tile.unit is not None or (tile.building is not None and not tile.building.hostile):
+            b = tile.building
+            if swarm.flying and b is not None and not b.hostile and not b.civil:
+                dest = self._leap_target(swarm, n)
+                if dest is not None:
+                    self.grid.move_swarm(swarm, dest)
+                    return True
+            if tile.unit is not None or (b is not None and not b.hostile):
                 swarm.intent = n
                 return False
             if tile.swarm is not None:
                 other = tile.swarm
-                if other.space <= 0:
+                if not swarm.can_merge(other):
                     continue
                 moved = min(other.space, swarm.count)
                 other.count += moved
@@ -448,23 +493,25 @@ class World:
             self.grid.move_swarm(swarm, self.rng.choice(options))
 
     def zombies_move(self) -> None:
-        civil = self.civil_field()
-        cache: dict[Pos, dict[Pos, float]] = {}
+        cache: dict[tuple, dict[Pos, float]] = {}
         swarms = self.grid.swarms()
         for s in swarms:
             s.intent = None
-            if not s.aggressive and civil.get(s.pos, INF) <= AGGRO_DISTANCE:
-                s.aggressive = True
-        swarms.sort(key=lambda s: (self._field_for(s, civil, cache).get(s.pos, INF), s.pos))
+            if not s.aggressive:
+                key = (None, s.flying)
+                if key not in cache:
+                    cache[key] = self.civil_field(s.flying)
+                if cache[key].get(s.pos, INF) <= AGGRO_DISTANCE:
+                    s.aggressive = True
+        swarms.sort(key=lambda s: (self._field_for(s, cache).get(s.pos, INF), s.pos))
         for s in swarms:
             if s.count <= 0 or self.grid.tile(s.pos).swarm is not s:
                 continue
             if not s.aggressive:
                 self._wander(s)
                 continue
-            for _ in range(ZOMBIE_SPEED):
-                field = self._field_for(s, civil, cache)
-                if not self._step_swarm(s, field):
+            for _ in range(s.speed):
+                if not self._step_swarm(s, self._field_for(s, cache)):
                     break
 
     def ballistas_fire(self) -> None:
@@ -482,7 +529,7 @@ class World:
             self.zombies_killed += killed
             self.effects.append(Effect(b.pos, target.pos, "bolt"))
             self.emit_noise(b.pos, BALLISTA_NOISE, b.name)
-            self.message(f"Balista em {b.pos} abateu {killed} zumbi(s).")
+            self.message(f"Balista em {b.pos} abateu {killed} {target.name}(s).")
             if not target.alive:
                 self.grid.remove_swarm(target)
 
@@ -499,31 +546,29 @@ class World:
         for s in sorted(self.grid.swarms(), key=lambda s: s.pos):
             if not s.alive:
                 continue
-            targets: list[Entity] = []
-            for n in self.grid.neighbors4(s.pos):
-                t = self.grid.tile(n)
-                if t.unit is not None and t.unit.alive:
-                    targets.append(t.unit)
-                elif t.building is not None and not t.building.hostile and t.building.alive:
-                    targets.append(t.building)
+            targets = self._swarm_targets(s)
             if not targets:
                 continue
             target = next((e for e in targets if e.pos == s.intent), None)
             if target is None:
                 target = min(targets, key=self._attack_priority)
-            dealt = target.take_damage(s.attack_power)
-            self.effects.append(Effect(s.pos, target.pos, "bite"))
+            dealt = target.take_damage(s.damage_against(isinstance(target, Building)))
+            ranged = Grid.manhattan(s.pos, target.pos) > 1
+            self.effects.append(Effect(s.pos, target.pos, "spit" if ranged else "bite"))
             if target.alive:
-                self.message(f"Enxame ({s.count}) causou {dealt} de dano em {target.name}.")
+                verb = "cuspiu ácido" if ranged else "causou"
+                self.message(f"{s.name} ({s.count}) {verb}: {dealt} de dano em {target.name}.")
             else:
                 self._on_destroyed(target, s)
 
     def _on_destroyed(self, target: Entity, attacker: ZombieSwarm) -> None:
         if isinstance(target, Unit):
             self.grid.remove_unit(target)
-            if attacker.space > 0:
+            if attacker.space > 0 and Grid.manhattan(attacker.pos, target.pos) <= 1:
                 attacker.count += 1
-            self.message(f"{target.name} foi devorado e se juntou ao enxame!")
+                self.message(f"{target.name} foi devorado e virou {attacker.name}!")
+            else:
+                self.message(f"{target.name} foi morto por {attacker.name}s!")
         elif isinstance(target, Tent):
             self.message(f"Tenda em {target.pos} caiu! A infecção se espalha...")
         elif isinstance(target, CommandCenter):
@@ -550,7 +595,7 @@ class World:
             if remaining <= 0:
                 break
             tile = self.grid.tile(n)
-            if tile.swarm is not None and tile.swarm.space > 0:
+            if tile.swarm is not None and tile.swarm.kind == "walker" and tile.swarm.space > 0:
                 add = min(tile.swarm.space, remaining)
                 tile.swarm.count += add
                 tile.swarm.aggressive = True
@@ -561,18 +606,25 @@ class World:
                 remaining -= swarm.count
         return amount - remaining
 
-    def _spawn_wave(self, swarms: int, size: int) -> int:
-        spawned = 0
-        for i in range(swarms):
-            side = i % 4
-            for _ in range(60):
-                k = self.rng.randrange(GRID_W if side in (0, 1) else GRID_H)
-                pos = {0: (k, 0), 1: (k, GRID_H - 1), 2: (0, k), 3: (GRID_W - 1, k)}[side]
-                if self.grid.is_free(pos):
-                    self.grid.place_swarm(ZombieSwarm(pos, size, aggressive=True))
-                    spawned += 1
-                    break
+    def _spawn_wave(self, groups: list[tuple[str, int, int]]) -> dict[str, int]:
+        spawned: dict[str, int] = {}
+        i = self.rng.randrange(4)
+        for kind, swarms, size in groups:
+            for _ in range(swarms):
+                side = i % 4
+                i += 1
+                for _ in range(60):
+                    k = self.rng.randrange(GRID_W if side in (0, 1) else GRID_H)
+                    pos = {0: (k, 0), 1: (k, GRID_H - 1), 2: (0, k), 3: (GRID_W - 1, k)}[side]
+                    if self.grid.is_free(pos):
+                        self.grid.place_swarm(ZombieSwarm(pos, size, aggressive=True, kind=kind))
+                        spawned[kind] = spawned.get(kind, 0) + 1
+                        break
         return spawned
+
+    @staticmethod
+    def _describe_wave(spawned: dict[str, int]) -> str:
+        return ", ".join(f"{n} {ZOMBIE_SPECS[k].name}" for k, n in spawned.items()) or "nenhum"
 
     def end_round(self) -> None:
         """Cleanup: produção, memória de som, ondas e condição de vitória."""
@@ -585,12 +637,12 @@ class World:
                 if s.noise_turns == 0:
                     s.noise_target = None
         if self.turn in WAVES:
-            n = self._spawn_wave(*WAVES[self.turn])
-            self.message(f"Uma onda de {n} enxame(s) surge nas bordas!")
+            spawned = self._spawn_wave(WAVES[self.turn])
+            self.message(f"Onda nas bordas: {self._describe_wave(spawned)}!")
         if self.turn == FINAL_HORDE_TURN:
-            n = self._spawn_wave(*FINAL_HORDE)
+            spawned = self._spawn_wave(FINAL_HORDE)
             self.final_horde_spawned = True
-            self.message(f"A HORDA FINAL chegou: {n} enxames!")
+            self.message(f"A HORDA FINAL chegou: {self._describe_wave(spawned)}!")
 
         if self.check_defeat():
             return

@@ -20,12 +20,14 @@ SPRITE_FILES: dict[str, tuple[str, float]] = {
     "tent": ("tend.png", 0.5),
     "infected": ("tend.png", 0.5),
     "zombie_runner": ("runner.png", 0.2),
-    "zombie": ("zombie.png", 0.15),
-    "zombie_executor": ("executor.png", 0.2),
+    "zombie_walker": ("zombie.png", 0.15),
+    "zombie_brute": ("executor.png", 0.2),
+    "zombie_harpy": ("runner.png", 0.2),
+    "zombie_venom": ("zombie.png", 0.15),
 }
-# densidade mínima do enxame -> sprite (maior limite atingido vence)
-SWARM_SPRITES = ((1, "zombie_runner"), (4, "zombie"), (7, "zombie_executor"))
 INFECTED_TINT = (140, 230, 110)
+# tipos sem arte própria reaproveitam uma imagem com tingimento
+ZOMBIE_TINTS = {"harpy": (205, 150, 255), "venom": (165, 255, 110)}
 EXHAUSTED_TINT = (120, 120, 120)
 
 # --- Grade / Janela -------------------------------------------------------
@@ -46,8 +48,7 @@ MAX_TURNS = 15
 AP_PER_TURN = 6
 HQ_BUILD_RADIUS = 4         # território (Chebyshev) ao redor do Centro de Comando
 TESLA_BUILD_RADIUS = 3      # território (Chebyshev) ao redor de cada Torre Tesla
-MAX_SWARM_SIZE = 10
-ZOMBIE_SPEED = 2            # passos por turno para enxames agressivos
+MAX_SWARM_SIZE = 10         # limite absoluto; cada tipo tem seu próprio `max_stack`
 AGGRO_DISTANCE = 7          # custo de caminho até alvo civil que desperta enxames ociosos
 WALL_BASH_COST = 6          # custo de "atravessar" um muro/balista no pathfinding
 FOREST_MOVE_COST = 2
@@ -75,10 +76,19 @@ BALLISTA_NOISE = 2
 START_RESOURCES = {"gold": 10, "wood": 12, "stone": 4}
 RESOURCE_LABELS = {"gold": "Ouro", "wood": "Madeira", "stone": "Pedra"}
 
-# fim do turno N -> (quantidade de enxames, tamanho)
-WAVES = {2: (2, 4), 4: (3, 5), 6: (3, 6), 8: (4, 6)}
+# fim do turno N -> lista de (tipo de zumbi, quantidade de enxames, tamanho)
+WAVES: dict[int, list[tuple[str, int, int]]] = {
+    2: [("walker", 2, 4)],
+    4: [("walker", 2, 5), ("runner", 1, 4)],
+    6: [("walker", 2, 6), ("brute", 1, 2), ("harpy", 1, 3)],
+    8: [("walker", 2, 6), ("runner", 1, 5), ("venom", 1, 3), ("brute", 1, 3)],
+}
 FINAL_HORDE_TURN = 9
-FINAL_HORDE = (8, 9)
+FINAL_HORDE: list[tuple[str, int, int]] = [
+    ("walker", 4, 9), ("runner", 2, 7), ("brute", 2, 3), ("harpy", 1, 4), ("venom", 1, 4),
+]
+# tipos dos enxames iniciais espalhados pelo mapa (sorteio ponderado)
+START_SWARM_TYPES = (("walker", 4), ("runner", 1))
 
 PHASE_DELAY = 0.45  # segundos exibindo cada fase automática
 
@@ -122,6 +132,37 @@ class UnitSpec:
     damage: int
     noise: int
 
+
+@dataclass(frozen=True)
+class ZombieSpec:
+    """Atributos por tipo de zumbi (inspirados em They Are Billions)."""
+    name: str
+    symbol: str
+    hp: int                  # HP de cada zumbi da pilha
+    speed: int               # passos por turno quando agressivo
+    attack: float            # dano por zumbi (dano do enxame = ceil(qtd * attack))
+    max_stack: int           # zumbis por tile
+    attack_range: int = 1    # >1: ataque à distância (Manhattan)
+    structure_mult: float = 1.0   # multiplicador de dano contra construções
+    flying: bool = False     # salta por cima de muros/balistas/teslas
+    hearing: int = 0         # bônus no raio de barulho que o alerta
+    description: str = ""
+
+
+ZOMBIE_SPECS: dict[str, ZombieSpec] = {
+    "walker": ZombieSpec("Errante", "Z", hp=1, speed=2, attack=0.5, max_stack=10,
+                         description="Comum; forte em grandes pilhas."),
+    "runner": ZombieSpec("Corredor", "C", hp=1, speed=3, attack=0.5, max_stack=8, hearing=2,
+                         description="Rápido (3 passos) e ouve barulho de mais longe."),
+    "brute": ZombieSpec("Brutamontes", "B", hp=3, speed=1, attack=1.5, max_stack=4,
+                        structure_mult=2.0,
+                        description="Lento e resistente (3 HP cada); dano dobrado em construções."),
+    "harpy": ZombieSpec("Harpia", "H", hp=1, speed=3, attack=0.75, max_stack=5, flying=True,
+                        description="Salta por cima de muros, balistas e teslas."),
+    "venom": ZombieSpec("Cuspidor", "V", hp=2, speed=2, attack=0.75, max_stack=5,
+                        attack_range=2,
+                        description="Cospe ácido a 2 tiles de distância (2 HP cada)."),
+}
 
 BUILD_SPECS: dict[str, BuildSpec] = {
     "wall": BuildSpec("Muro", "M", ap=1, gold=0, wood=2, stone=0, hp=10, noise=2),
@@ -178,6 +219,12 @@ COLORS: dict[str, tuple[int, int, int]] = {
     "hover": (255, 255, 160),
     "shot": (255, 240, 120),
     "bite": (255, 40, 40),
+    "spit": (150, 230, 60),
+    "zombie_walker": (105, 36, 36),
+    "zombie_runner": (150, 60, 30),
+    "zombie_brute": (90, 70, 90),
+    "zombie_harpy": (130, 60, 170),
+    "zombie_venom": (90, 150, 40),
     "bolt": (255, 160, 60),
     "button": (54, 54, 70),
     "button_hover": (76, 76, 98),

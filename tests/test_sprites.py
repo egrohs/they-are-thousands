@@ -42,10 +42,9 @@ class SpriteTests(unittest.TestCase):
             self.assertEqual(sm.get(key, 48).get_size(), (48, 48), key)
         self.assertEqual(sm.errors, [])
 
-    def test_swarm_sprite_by_density(self):
-        self.assertEqual(swarm_sprite_key(1), "zombie_runner")
-        self.assertEqual(swarm_sprite_key(5), "zombie")
-        self.assertEqual(swarm_sprite_key(10), "zombie_executor")
+    def test_swarm_sprite_by_type(self):
+        for kind in ("walker", "runner", "brute", "harpy", "venom"):
+            self.assertIn(swarm_sprite_key(kind), SPRITE_FILES)
 
 
 if __name__ == "__main__":

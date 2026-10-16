@@ -7,19 +7,16 @@ from typing import Optional
 
 import pygame
 
-from .config import BUILD_SPECS, COLORS, EXHAUSTED_TINT, INFECTED_TINT, SWARM_SPRITES, TILE_SIZE
+from .config import (BUILD_SPECS, COLORS, EXHAUSTED_TINT, INFECTED_TINT, TILE_SIZE,
+                     ZOMBIE_TINTS)
 from .entities import Building, Unit, ZombieSwarm
 from .grid import Pos, Terrain
 from .sprites import SpriteManager
 from .world import World
 
 
-def swarm_sprite_key(count: int) -> str:
-    key = SWARM_SPRITES[0][1]
-    for threshold, name in SWARM_SPRITES:
-        if count >= threshold:
-            key = name
-    return key
+def swarm_sprite_key(kind: str) -> str:
+    return f"zombie_{kind}"
 
 
 @dataclass
@@ -329,7 +326,7 @@ class Renderer:
 
     def _draw_swarm(self, surface, rect: pygame.Rect, s: ZombieSwarm, ts) -> None:
         border = COLORS["zombie_noise"] if s.noise_target is not None else (0, 0, 0)
-        dest = self._sprite(surface, swarm_sprite_key(s.count), rect)
+        dest = self._sprite(surface, swarm_sprite_key(s.kind), rect, ZOMBIE_TINTS.get(s.kind))
         if dest is not None:
             if s.aggressive and s.noise_target is None:
                 border = COLORS["zombie_aggr"]
@@ -340,12 +337,17 @@ class Renderer:
                                badge, r)
             pygame.draw.circle(surface, (0, 0, 0), badge, r, 1)
             self._text(surface, str(s.count), badge, r * 1.7)
+            tag = pygame.Rect(dest.x + 2, dest.y + 2, r * 2, r * 2)
+            pygame.draw.rect(surface, COLORS[f"zombie_{s.kind}"], tag, border_radius=3)
+            pygame.draw.rect(surface, (0, 0, 0), tag, 1, border_radius=3)
+            self._text(surface, s.spec.symbol, tag.center, r * 1.7)
             return
         inner = rect.inflate(-max(2, int(ts * 0.14)), -max(2, int(ts * 0.14)))
-        color = COLORS["zombie_aggr"] if s.aggressive else COLORS["zombie_idle"]
-        pygame.draw.rect(surface, color, inner)
+        pygame.draw.rect(surface, COLORS[f"zombie_{s.kind}"], inner)
+        if s.aggressive and s.noise_target is None:
+            border = COLORS["zombie_aggr"]
         pygame.draw.rect(surface, border, inner, 2)
-        self._text(surface, str(s.count), inner.center, ts * 0.62)
+        self._text(surface, f"{s.spec.symbol}{s.count}", inner.center, ts * 0.5)
 
     def _draw_pending_noise(self, surface, world: World, cam: Camera) -> None:
         for ev in world.pending_noise:

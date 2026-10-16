@@ -36,9 +36,26 @@ em loop, com fade. Sem dispositivo de áudio ou com arquivo inválido, o jogo se
 Imagens de `assets/images/` (mapeadas em `SPRITE_FILES` no `config.py`) são recortadas para o tile
 e reescaladas conforme o zoom:
 - `ranger.png` → Ranger; `tend.png` → Tenda (e Casa Infectada, tingida de verde).
-- Enxames por densidade: `runner.png` (1–3), `zombie.png` (4–6), `executor.png` (7–10);
-  o número fica no selo do canto (vermelho = agressivo; borda laranja = atraído por barulho).
+- Zumbis por tipo: Errante `zombie.png`, Corredor `runner.png`, Brutamontes `executor.png`;
+  Harpia (`runner.png` roxo) e Cuspidor (`zombie.png` verde). Letra do tipo no canto superior,
+  quantidade no selo inferior (vermelho = agressivo; borda laranja = atraído por barulho).
 - Sem imagem (Soldado, CC, Muro, Balista, Tesla) ou arquivo ausente → placeholder geométrico.
+
+## Tipos de zumbi
+Inspirados em *They Are Billions* (atributos em `ZOMBIE_SPECS` no `config.py`). Cada tile guarda
+uma pilha de um único tipo; pilhas de tipos diferentes não se fundem.
+
+| Tipo | Letra | HP cada | Vel. | Pilha máx. | Habilidade |
+|---|---|---|---|---|---|
+| Errante | Z | 1 | 2 | 10 | Comum; forte em grandes pilhas |
+| Corredor | C | 1 | 3 | 8 | Rápido; ouve barulho +2 tiles mais longe |
+| Brutamontes | B | 3 | 1 | 4 | Resistente; dano ×2 em construções |
+| Harpia | H | 1 | 3 | 5 | Salta por cima de Muros/Balistas/Teslas |
+| Cuspidor | V | 2 | 2 | 5 | Ataque à distância (2 tiles); para ao ter alvo no alcance |
+
+Dano do enxame = `ceil(quantidade × dano do tipo)`. Tipos com HP > 1 acumulam ferimentos
+entre ataques. Os primeiros turnos trazem Errantes/Corredores; Brutamontes, Harpias e Cuspidores
+aparecem a partir das ondas dos turnos 6 e 8 e na horda final. Casas Infectadas geram Errantes.
 
 ## Névoa de guerra (FOW)
 Adaptada de *They Are Billions*; liga/desliga pelo menu inicial/pausa ou `F`, a qualquer momento.
@@ -57,15 +74,15 @@ Construa Teslas na borda para avançar; se uma Tesla cair, o território dela so
 ## Fases do turno
 1. **Jogador** – gasta AP global (construir, reparar, atacar, coletar). Cada unidade move 1× e age 1×.
 2. **Som** – ações emitem ruído (raio Manhattan); enxames no raio são atraídos à fonte.
-3. **Zumbis** – enxames (1–10 por tile) seguem campo de fluxo Dijkstra até alvos civis/som, fundem-se ao se encontrarem.
+3. **Zumbis** – enxames tipados (pilhas por tile) seguem campo de fluxo Dijkstra até alvos civis/som; pilhas do mesmo tipo se fundem.
 4. **Defesas** – Balistas disparam automaticamente.
-5. **Ataque/Infecção** – enxames atacam vizinhos; Tenda com HP 0 vira Casa Infectada que gera zumbis.
+5. **Ataque/Infecção** – enxames atacam vizinhos (Cuspidores à distância); Tenda com HP 0 vira Casa Infectada que gera zumbis.
 6. **Fim de rodada** – produção de ouro, ondas nas bordas, checagem de vitória.
 
 ## Estrutura
 - `game/config.py` – balanceamento, custos, cores
 - `game/grid.py` – `Grid`, `Tile`, `Terrain`, distâncias, BFS/Dijkstra
-- `game/entities.py` – `Building` (CC, Tenda, Muro, Balista, Tesla, Casa Infectada), `Unit` (Soldado, Ranger), `ZombieSwarm`
+- `game/entities.py` – `Building` (CC, Tenda, Muro, Balista, Tesla, Casa Infectada), `Unit` (Soldado, Ranger), `ZombieSwarm` (tipado)
 - `game/world.py` – regras e simulação (sem pygame)
 - `game/turns.py` – máquina de estados das fases
 - `game/renderer.py` – câmera (offset/zoom) e desenho
