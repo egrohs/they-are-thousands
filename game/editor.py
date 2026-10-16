@@ -189,10 +189,8 @@ class MapEditor:
             if is_hq and terrain is not Terrain.GRASS:
                 self.status = "O CC só fica em Campo; mova-o antes."
                 return False
-            if terrain is Terrain.WATER:
+            if not terrain.passable:
                 tile.building = tile.unit = tile.swarm = None
-            elif not terrain.buildable:
-                tile.building = None
             tile.terrain, tile.resource_amount = terrain, amount
             return True
         if tool == "erase":
@@ -217,7 +215,7 @@ class MapEditor:
         if category == "b":
             return self._place_building(pos, kind)
         if not tile.terrain.passable:
-            self.status = "Unidades e zumbis não ficam na Água."
+            self.status = f"Unidades e zumbis não ficam em {tile.terrain.label}."
             return False
         if category == "u":
             if tile.unit is not None and tile.unit.kind == kind:

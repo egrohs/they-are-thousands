@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from .config import (AGGRO_DISTANCE, AP_PER_TURN, ATTACK_AP,
-                     FOREST_MOVE_COST, FOW_ENABLED_DEFAULT, GATHER_AMOUNT,
+                     FOW_ENABLED_DEFAULT, GATHER_AMOUNT,
                      GATHER_AP, GATHER_NOISE, GRID_H, GRID_W, MAX_TURNS,
                      NOISE_MEMORY_TURNS, REPAIR_AMOUNT, REPAIR_AP, REPAIR_NOISE, REPAIR_WOOD,
                      RESOURCE_LABELS, START_RESOURCES, START_SWARM_TYPES, WALL_BASH_COST,
@@ -182,6 +182,15 @@ class World:
             tile.terrain = terrain
             tile.resource_amount = self.rng.randint(*amount) if terrain.resource else 0
 
+    def _fill_isolated_pockets(self) -> None:
+        """Terreno bloqueia movimento: bolsões de Campo sem acesso ao centro viram Floresta,
+        para que nenhuma unidade/enxame nasça preso."""
+        reach = self.grid.bfs_reachable(self.center, GRID_W * GRID_H,
+                                        lambda p: self.grid.tile(p).terrain.passable)
+        for t in self.grid:
+            if t.terrain.passable and t.pos not in reach:
+                t.terrain, t.resource_amount = Terrain.FOREST, self.rng.randint(5, 9)
+
     def _generate_map(self) -> None:
         self._blob(self._random_pos(7), self.rng.randint(8, 14), Terrain.WATER, (0, 0))
         self._blob(self._random_pos(4, 5), 5, Terrain.FOREST, (5, 9))
@@ -190,6 +199,7 @@ class World:
             self._blob(self._random_pos(5), self.rng.randint(4, 8), Terrain.FOREST, (5, 9))
         for _ in range(2):
             self._blob(self._random_pos(6), self.rng.randint(3, 5), Terrain.ROCK, (4, 8))
+        self._fill_isolated_pockets()
 
         cx, cy = self.center
         self.hq = CommandCenter((cx, cy))
@@ -454,8 +464,6 @@ class World:
                 return None
             if not b.civil:
                 return 1.0 if flying else float(WALL_BASH_COST)
-        if tile.terrain is Terrain.FOREST:
-            return float(FOREST_MOVE_COST)
         return 1.0
 
     def _flying_enter_cost(self, pos: Pos) -> Optional[float]:
@@ -716,6 +724,8 @@ class World:
         self.message(f"{label}: ~{wave.zombies} zumbis pelo {wave.directions} {when}.")
 
     def _wave_spawn_cells(self, group: WaveGroup) -> list[Pos]:
+        # evita bolsões isolados por terreno (ex.: mapas do editor)
+        reachable = self.grid.dijkstra([self.hq.pos], self._zombie_enter_cost)
         side = group.side
         along0 = group.anchor[0] if side in (0, 1) else group.anchor[1]
         length = GRID_W if side in (0, 1) else GRID_H
@@ -725,9 +735,10 @@ class World:
                 for along in range(max(0, along0 - spread), min(length, along0 + spread + 1)):
                     pos = edge_pos(side, along, depth)
                     if self.grid.is_free(pos):
-                        cells.append((depth, abs(along - along0), self.rng.random(), pos))
+                        cells.append((pos not in reachable, depth, abs(along - along0),
+                                      self.rng.random(), pos))
             if cells:
-                return [c[3] for c in sorted(cells)]
+                return [c[4] for c in sorted(cells)]
         return []
 
     def _spawn_group(self, group: WaveGroup) -> int:

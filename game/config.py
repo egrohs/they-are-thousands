@@ -57,7 +57,6 @@ AP_PER_TURN = 6
 MAX_SWARM_SIZE = 10         # limite absoluto; cada tipo tem seu próprio `max_stack`
 AGGRO_DISTANCE = 7          # custo de caminho até alvo civil que desperta enxames ociosos
 WALL_BASH_COST = 6          # custo de "atravessar" um muro/balista no pathfinding
-FOREST_MOVE_COST = 2
 NOISE_MEMORY_TURNS = 2
 WANDER_CHANCE = 0.35
 

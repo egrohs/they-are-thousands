@@ -1,7 +1,7 @@
 # They Are Thousands — protótipo tático por turnos
 
 Survival tático em grade 24×24 (top-down), inspirado em *They Are Billions* + *Into the Breach*.
-Sobreviva 15 turnos protegendo o **Centro de Comando (CC)**; a horda final surge no fim do turno 9.
+Sobreviva 15 turnos protegendo o **Centro de Comando (CC)**; ondas programadas chegam a cada 3 turnos por uma borda anunciada e a horda final vem no turno 12.
 
 ```bash
 pip install -r requirements.txt
@@ -38,12 +38,13 @@ Menu → **Editor de Mapas** (`E`) ou `python main.py --editor`.
 - **Qtd** (`[` `]`): zumbis por enxame (limitado pela pilha máx. do tipo) e recurso do depósito.
   **Pincel** (`B`): 1x1 ou 3x3 para terreno/borracha.
 - Sempre há exatamente 1 CC: colocar outro o move; ele não pode ser apagado nem ficar fora do Campo.
-  Construções transformam o tile em Campo; Água remove o que houver no tile.
+  Construções transformam o tile em Campo; Floresta, Pedreira e Água removem o que houver no tile
+  (unidades e zumbis só ficam em Campo).
 - `Ctrl+Z`/`Ctrl+Y` desfazer/refazer, **Vazio**/**Aleatório** criam um novo mapa base.
 - Clique no nome para renomear; **Salvar** (`Ctrl+S`) grava `maps/<nome>.json`; a lista de
   mapas salvos no painel carrega com um clique.
 - **Jogar** (`F5`) inicia uma partida com o mapa atual. No menu, **Mapa: ...** alterna entre
-  Aleatório e os mapas salvos para a **Nova Partida**. Ondas e horda final continuam vindo das bordas.
+  Aleatório e os mapas salvos para a **Nova Partida**. Ondas e horda final seguem o cronograma de `data/waves.csv`.
 - Formato JSON documentado em `game/maps.py` (validado ao carregar, com mensagens de erro).
 
 ## Trilha sonora
@@ -73,7 +74,18 @@ uma pilha de um único tipo; pilhas de tipos diferentes não se fundem.
 
 Dano do enxame = `ceil(quantidade × dano do tipo)`. Tipos com HP > 1 acumulam ferimentos
 entre ataques. Os primeiros turnos trazem Errantes/Corredores; Brutamontes, Harpias e Cuspidores
-aparecem a partir das ondas dos turnos 6 e 8 e na horda final. Casas Infectadas geram Errantes.
+aparecem a partir da onda do turno 9 e na horda final. Casas Infectadas geram Errantes.
+
+## Ondas programadas
+Como em *They Are Billions*, as ondas seguem um cronograma fixo (`data/waves.csv`): ondas pequenas
+nos turnos **3, 6 e 9**, cada uma entrando por **uma única borda**, e a **horda final** no turno
+**12**, vindo de duas bordas ao mesmo tempo. A borda e o ponto de entrada são sorteados no início da
+partida (determinísticos pela seed), então dá para se preparar:
+- **Indicador no mapa** (a partir de 3 turnos antes): faixa vermelha na borda de entrada, seta
+  apontando para dentro e contagem (`ONDA em 2`, `ONDA!` no turno de chegada, piscando). Se a
+  entrada estiver fora da tela, uma seta presa à borda da tela aponta para ela.
+- **HUD**: `Onda: Norte ~8 - em 2 turno(s)`; o log de eventos anuncia cada próxima onda.
+- A onda chega no fim do turno indicado, perto do ponto anunciado (±4 tiles ao longo da borda).
 
 ## Névoa de guerra (FOW)
 Adaptada de *They Are Billions*; liga/desliga pelo menu inicial/pausa ou `F`, a qualquer momento.
@@ -89,13 +101,20 @@ Só se constrói dentro do território (contorno azul no mapa): raio 4 do CC e r
 **Torre Tesla** (`5`, 1 AP, 3 Ouro, 2 Madeira, HP 4). Tendas, Balistas e Muros não expandem.
 Construa Teslas na borda para avançar; se uma Tesla cair, o território dela some.
 
+## Terreno
+Só o **Campo** é atravessável. **Floresta**, **Pedreira** e **Água** bloqueiam o movimento de todas
+as unidades e de todos os zumbis (inclusive Harpias, que só saltam construções). Florestas e
+pedreiras funcionam como barreiras naturais e podem ser coletadas de um tile vizinho (inclusive na
+diagonal); ao esgotar, viram Campo e abrem passagem. Mapas aleatórios nunca geram bolsões de Campo
+isolados (eles viram Floresta), e as ondas entram por tiles da borda com caminho até a base.
+
 ## Fases do turno
 1. **Jogador** – gasta AP global (construir, reparar, atacar, coletar). Cada unidade move 1× e age 1×.
 2. **Som** – ações emitem ruído (raio Manhattan); enxames no raio são atraídos à fonte.
 3. **Zumbis** – enxames tipados (pilhas por tile) seguem campo de fluxo Dijkstra até alvos civis/som; pilhas do mesmo tipo se fundem.
 4. **Defesas** – Balistas disparam automaticamente.
 5. **Ataque/Infecção** – enxames atacam vizinhos (Cuspidores à distância); Tenda com HP 0 vira Casa Infectada que gera zumbis.
-6. **Fim de rodada** – produção de ouro, ondas nas bordas, checagem de vitória.
+6. **Fim de rodada** – produção de ouro, ondas programadas na borda anunciada, checagem de vitória.
 
 ## Balanceamento (CSV)
 Os stats ficam em `data/` (um arquivo por categoria, uma linha por tipo, `id` como chave).
@@ -106,20 +125,21 @@ Edite no Excel/LibreOffice ou num editor de texto e **reinicie o jogo** para apl
 | `data/buildings.csv` | `buildable` (aparece nos botões), custo `ap/gold/wood/stone`, `hp`, `noise` (ao construir), `gold_income`, `vision`, `build_radius` (território), `attack_range`/`damage`/`attack_noise` (defesa automática), `spawn` (Casa Infectada) |
 | `data/units.csv` | `hp`, `move`, `attack_range`, `damage`, `noise` (ao atacar), `vision` |
 | `data/zombies.csv` | `hp` (por zumbi), `speed`, `attack` (dano por zumbi), `max_stack` (≤ 10), `attack_range`, `structure_mult`, `flying`, `hearing`, `color` (`#rrggbb`), `description` |
+| `data/waves.csv` | `turn` (chega ao fim dele), `direction` (`N`, `S`, `L`, `O` ou `?` = sorteada; `?1`/`?2` = bordas sorteadas distintas no mesmo turno), `kind`, `swarms`, `size`, `final` (1 = horda final, um único turno) |
 
 - Separador `,` ou `;` (detectado automaticamente); com `;` aceita vírgula decimal (Excel pt-BR).
 - Booleanos: `0/1`, `true/false`, `sim/nao`. Coluna `notes` é livre. Linhas com `id` iniciado por `#` são ignoradas.
 - Erros (coluna ausente, valor inválido, id faltando/duplicado) abortam com arquivo, linha e coluna.
 - Construções/unidades têm ids fixos (`hq, tent, wall, ballista, tesla, infected` / `soldier, ranger`).
   Novos **tipos de zumbi** podem ser criados só no CSV (usam o visual geométrico com a `color`);
-  para aparecerem nas ondas, adicione-os em `WAVES`/`FINAL_HORDE` no `config.py`.
+  para aparecerem nas ondas, adicione linhas em `data/waves.csv`.
 - Qualquer construção com `attack_range` e `damage` > 0 dispara na fase de defesa.
-- Regras gerais (AP por turno, ondas, recursos iniciais, reparo/coleta) continuam em `game/config.py`.
+- Regras gerais (AP por turno, recursos iniciais, reparo/coleta, aviso de ondas) continuam em `game/config.py`.
 
 ## Estrutura
-- `data/*.csv` – stats de construções, unidades e zumbis (balanceamento)
+- `data/*.csv` – stats de construções, unidades e zumbis + cronograma de ondas (balanceamento)
 - `game/stats.py` – leitura/validação dos CSVs
-- `game/config.py` – regras gerais, ondas, layout, cores
+- `game/config.py` – regras gerais, layout, cores
 - `game/grid.py` – `Grid`, `Tile`, `Terrain`, distâncias, BFS/Dijkstra
 - `game/entities.py` – `Building` (CC, Tenda, Muro, Balista, Tesla, Casa Infectada), `Unit` (Soldado, Ranger), `ZombieSwarm` (tipado)
 - `game/world.py` – regras e simulação (sem pygame)

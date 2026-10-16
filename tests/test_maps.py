@@ -102,16 +102,25 @@ class MapEditorTests(unittest.TestCase):
         self.assertIsNone(self.ed.validate())
 
     def test_erase_layers(self):
-        self.ed.tool = "t:rock"
-        self.ed.apply((1, 1))
         self.ed.tool = "z:walker"
         self.ed.apply((1, 1))
+        self.ed.tool = "t:rock"
+        self.ed.apply((1, 1))
+        self.assertIsNone(self.grid.tile((1, 1)).swarm)  # pedra não comporta zumbis
+        self.ed.tool = "z:walker"
+        self.assertFalse(self.ed.apply((1, 1)))
         self.ed.tool = "erase"
         self.ed.apply((1, 1))
-        self.assertIsNone(self.grid.tile((1, 1)).swarm)
-        self.assertEqual(self.grid.tile((1, 1)).terrain, Terrain.ROCK)
-        self.ed.apply((1, 1))
         self.assertEqual(self.ed.world.grid.tile((1, 1)).terrain, Terrain.GRASS)
+        self.ed.tool = "b:wall"
+        self.ed.apply((1, 1))
+        self.ed.tool = "z:walker"
+        self.ed.apply((2, 1))
+        self.ed.tool = "erase"
+        self.ed.apply((2, 1))
+        self.assertIsNone(self.grid.tile((2, 1)).swarm)
+        self.ed.apply((1, 1))
+        self.assertIsNone(self.grid.tile((1, 1)).building)
 
     def test_stroke_undo_redo(self):
         self.ed.begin_stroke()

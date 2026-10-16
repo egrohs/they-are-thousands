@@ -29,6 +29,60 @@ class GridTests(unittest.TestCase):
         self.assertEqual(field[(0, 0)], 12)
         self.assertNotIn((2, 0), field)
 
+    def test_only_grass_is_passable(self):
+        self.assertTrue(Terrain.GRASS.passable)
+        for terrain in (Terrain.FOREST, Terrain.ROCK, Terrain.WATER):
+            self.assertFalse(terrain.passable, terrain)
+
+
+class TerrainBlockingTests(unittest.TestCase):
+    def setUp(self):
+        self.world = World(seed=11, fog_enabled=False)
+        for t in self.world.grid:
+            t.terrain, t.resource_amount = Terrain.GRASS, 0
+            t.building = t.unit = t.swarm = None
+        self.world.hq.pos = (20, 20)
+        self.world.grid.place_building(self.world.hq)
+
+    def test_units_cannot_cross_forest_rock_or_water(self):
+        unit = Soldier((5, 5))
+        self.world.grid.place_unit(unit)
+        for x, y in ((6, 5), (4, 5), (5, 6)):
+            self.world.grid.tile((x, y)).terrain = Terrain.FOREST
+        self.world.grid.tile((5, 4)).terrain = Terrain.ROCK
+        self.assertEqual(self.world.unit_moves(unit), {})
+        self.world.grid.tile((5, 4)).terrain = Terrain.WATER
+        self.assertEqual(self.world.unit_moves(unit), {})
+
+    def test_units_path_around_obstacles_and_still_gather(self):
+        unit = Soldier((5, 5))
+        self.world.grid.place_unit(unit)
+        for y in range(0, 5):
+            self.world.grid.tile((6, y)).terrain = Terrain.ROCK
+            self.world.grid.tile((6, y)).resource_amount = 5
+        moves = self.world.unit_moves(unit)
+        self.assertNotIn((6, 4), moves)
+        self.assertEqual(moves.get((7, 5)), 2)
+        self.assertIn((6, 4), self.world.gather_targets(unit))
+
+    def test_zombies_cannot_cross_blocking_terrain(self):
+        for kind in ("walker", "harpy"):
+            swarm = ZombieSwarm((10, 10), 3, aggressive=True, kind=kind)
+            self.world.grid.place_swarm(swarm)
+            for n in self.world.grid.neighbors4((10, 10)):
+                self.world.grid.tile(n).terrain = Terrain.FOREST
+            self.world.zombies_move()
+            self.assertEqual(swarm.pos, (10, 10), kind)
+            self.world.grid.remove_swarm(swarm)
+
+    def test_generated_maps_have_no_isolated_pockets(self):
+        for seed in range(15):
+            w = World(seed=seed)
+            passable = lambda p: w.grid.tile(p).terrain.passable  # noqa: E731
+            reach = w.grid.bfs_reachable(w.center, 999, passable)
+            isolated = [t.pos for t in w.grid if t.terrain.passable and t.pos not in reach]
+            self.assertEqual(isolated, [], seed)
+
 
 class ZombieTypeTests(unittest.TestCase):
     def setUp(self):

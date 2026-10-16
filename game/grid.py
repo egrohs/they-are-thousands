@@ -22,7 +22,8 @@ class Terrain(Enum):
 
     @property
     def passable(self) -> bool:
-        return self is not Terrain.WATER
+        """Só Campo é atravessável: Floresta, Pedreira e Água bloqueiam unidades e zumbis."""
+        return self is Terrain.GRASS
 
     @property
     def buildable(self) -> bool:
